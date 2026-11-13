@@ -1,0 +1,1494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<link rel="icon" href="data:," />
+<title>GPS Speedometer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=Pirata+One&family=Special+Elite&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EFE3BC;
+    --paper-card:#FBF4DC;
+    --paper-soft:#E7D9AE;
+    --grid:rgba(70,90,140,.16);
+    --ink:#1B1811;
+    --ink-2:#5C5540;
+    --ink-3:#8A8168;
+    --line:#C9BB8C;
+    --red:#BC3B24;
+    --red-dark:#9C2E1B;
+    --shadow:rgba(27,24,17,.38);
+    --green:#1B7A3D;
+    --green-bg:#E2F0E6;
+    --amber:#9A6B00;
+    --amber-bg:#FFF3C4;
+    --err:#B91C1C;
+    --err-bg:#FDE8E8;
+    --stage:#000000;
+    --ro-color:#F7F1DE;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#161410;
+      --paper-card:#211E17;
+      --paper-soft:#2A271E;
+      --grid:rgba(140,150,190,.10);
+      --ink:#F2E7C9;
+      --ink-2:#B4AB90;
+      --ink-3:#7E7762;
+      --line:#3E392C;
+      --red:#D6492F;
+      --red-dark:#BC3B24;
+      --shadow:rgba(0,0,0,.6);
+      --green:#4ADE80;
+      --green-bg:#12291A;
+      --amber:#FACC15;
+      --amber-bg:#2A2306;
+      --err:#FCA5A5;
+      --err-bg:#2E1212;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    color:var(--ink);
+    font-family:"Barlow", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:26px 26px;
+  }
+  button, [role="button"]{ min-height:44px; }
+  .app{
+    max-width:680px;
+    margin:0 auto;
+    padding:14px 16px 22px;
+    display:flex;
+    flex-direction:column;
+    min-height:100dvh;
+  }
+
+  /* Top status bar */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .gps-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    background:var(--paper-card);
+    border:2px solid var(--ink);
+    border-radius:999px;
+    padding:8px 14px 8px 11px;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.02em;
+    line-height:1.15;
+    min-height:38px;
+    box-shadow:4px 4px 0 var(--shadow);
+  }
+  .dot{ width:10px; height:10px; border-radius:50%; background:var(--ink-3); flex:none; }
+  .dot.searching{ background:var(--amber); animation:pulse 1s ease-in-out infinite; }
+  .dot.live{ background:var(--green); box-shadow:0 0 0 4px var(--green-bg); }
+  .dot.error{ background:var(--err); }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+  @media (prefers-reduced-motion: reduce){ .dot.searching{animation:none} }
+  .top-right{
+    font-family:"Special Elite", "Courier New", monospace;
+    font-size:12.5px; color:var(--ink-2); text-align:right; line-height:1.35;
+  }
+  .top-right strong{ color:var(--ink); font-weight:400; }
+
+  /* ---------- The black stage (the speedo face) ---------- */
+  .stage{
+    position:relative;
+    margin-top:14px;
+    background:var(--stage);
+    border:2px solid var(--ink);
+    border-radius:6px;
+    box-shadow:8px 8px 0 var(--shadow);
+    min-height:400px;
+    overflow:hidden;
+    cursor:pointer;
+    touch-action:none;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none; -webkit-user-select:none;
+  }
+  .drift-space{ position:absolute; inset:0; }
+  .ro-pos{
+    position:absolute; left:50%; top:50%;
+    will-change:transform;
+  }
+  .ro-block{
+    text-align:center;
+    line-height:.9;
+    color:var(--ro-color);
+    transition:opacity .4s ease;
+  }
+  .ro-block.stale{ opacity:.35; }
+  .ro-speed{
+    font-family:"Barlow Condensed", "Barlow", sans-serif;
+    font-weight:700;
+    font-size:calc(clamp(118px, 36vw, 216px) * var(--spd-scale, 1));
+    letter-spacing:-.01em;
+    font-variant-numeric:tabular-nums;
+    line-height:.92;
+    white-space:nowrap;
+  }
+  .ro-block.outline .ro-speed{
+    color:transparent;
+    -webkit-text-stroke:2.5px var(--ro-color);
+    paint-order:stroke fill;
+  }
+  .ro-line{
+    font-family:"Special Elite", "Courier New", monospace;
+    color:var(--ro-color);
+    white-space:nowrap;
+  }
+  .ro-heading{
+    margin-top:calc(14px * var(--lbl-scale, 1));
+    font-size:calc(19px * var(--lbl-scale, 1));
+    opacity:.62;
+  }
+  .ro-max{
+    margin-top:calc(8px * var(--lbl-scale, 1));
+    font-size:calc(17px * var(--lbl-scale, 1));
+    opacity:.5;
+  }
+  .ro-search{
+    margin-top:16px;
+    font-size:16px;
+    opacity:.45;
+    letter-spacing:.04em;
+  }
+  .ro-line[hidden]{ display:none; }
+  .stage-hint{
+    position:absolute; left:0; right:0; bottom:10px;
+    text-align:center;
+    font-family:"Special Elite", monospace;
+    font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:#F7F1DE; opacity:.34;
+    pointer-events:none;
+  }
+  /* Brightness indicator — vertical bar that dodges the readout */
+  .bright-ind{
+    position:absolute; top:10%; height:80%; width:64px;
+    opacity:0; pointer-events:none;
+    transition:opacity .15s linear;
+  }
+  .bright-ind.show{ opacity:1; }
+  .bright-ind.side-left{ left:12px; }
+  .bright-ind.side-right{ right:12px; }
+  .bright-track{
+    position:absolute; left:0; top:0; bottom:0; width:26px;
+    border-radius:13px;
+    background:rgba(247,241,222,.22);
+    overflow:hidden;
+  }
+  .bright-fill{
+    position:absolute; left:0; bottom:0; width:100%;
+    background:#F7F1DE; border-radius:13px;
+    height:80%;
+  }
+  .bright-pct{
+    position:absolute; left:34px;
+    font-family:"Special Elite", monospace;
+    font-size:17px; color:#F7F1DE;
+    transform:translateY(50%);
+    white-space:nowrap;
+  }
+
+  /* Message / error */
+  .notice{
+    margin:12px 0 0;
+    border:2px solid var(--ink); border-radius:6px; padding:12px 14px;
+    font-size:14px; line-height:1.45; display:none;
+    box-shadow:5px 5px 0 var(--shadow);
+  }
+  .notice.show{ display:block; }
+  .notice.warn{ background:var(--amber-bg); }
+  .notice.error{ background:var(--err-bg); }
+  .notice.info{ background:var(--paper-card); color:var(--ink-2); }
+  .notice strong{ color:var(--ink); }
+
+  /* Stats — shop sheet cards */
+  .stats{
+    display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px;
+  }
+  @media (min-width:520px){ .stats{ grid-template-columns:repeat(4,1fr); } }
+  .stat{
+    background:var(--paper-card); border:2px solid var(--ink); border-radius:6px;
+    padding:13px 14px 11px;
+    box-shadow:6px 6px 0 var(--shadow);
+  }
+  .stat-label{
+    font-family:"Special Elite", monospace;
+    font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--red);
+  }
+  .stat-value{
+    margin-top:6px; font-family:"Special Elite", "Courier New", monospace;
+    font-size:27px; line-height:1; font-variant-numeric:tabular-nums;
+  }
+  .stat-value small{ font-size:13px; color:var(--ink-2); margin-left:3px; }
+  .stat-sub{ margin-top:6px; font-size:12.5px; color:var(--ink-2); line-height:1.3; }
+  .secondary{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:12px; }
+  .secondary .stat{ padding:10px 12px 9px; }
+  .secondary .stat-value{ font-size:19px; }
+
+  /* Controls */
+  .controls{ margin-top:18px; }
+  .main-btn{
+    width:100%; border:2px solid var(--ink); border-radius:6px; cursor:pointer;
+    background:var(--red); color:#FFF7E8;
+    font:700 19px/1 "Barlow",sans-serif; letter-spacing:.05em; text-transform:uppercase;
+    padding:18px 16px; min-height:60px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    box-shadow:6px 6px 0 var(--ink);
+  }
+  .main-btn:active{ transform:translate(3px,3px); box-shadow:3px 3px 0 var(--ink); }
+  .main-btn.is-stop{ background:var(--ink); color:var(--paper); box-shadow:6px 6px 0 var(--red-dark); }
+  .main-btn:disabled{ opacity:.55; cursor:not-allowed; }
+  .row-btns{ display:flex; gap:12px; margin-top:12px; }
+  .ghost-btn{
+    flex:1; background:var(--paper-card); color:var(--ink); border:2px solid var(--ink);
+    border-radius:6px; padding:12px 10px; font:600 14px/1.2 "Barlow",sans-serif; cursor:pointer; min-height:48px;
+    display:flex; align-items:center; justify-content:center; gap:7px; text-align:center;
+    box-shadow:5px 5px 0 var(--shadow);
+  }
+  .ghost-btn:active{ transform:translate(2px,2px); box-shadow:3px 3px 0 var(--shadow); }
+  .ghost-btn[aria-pressed="true"]{ background:var(--paper-soft); }
+  .ghost-btn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  .install-btn{ width:100%; margin-top:12px; flex:none; border-style:dashed; font-weight:700; }
+  .install-btn .install-icon{
+    width:22px; height:22px; flex:none; border:2px solid currentColor; border-radius:5px;
+    display:grid; place-items:center; font-size:15px; line-height:1; font-weight:700;
+  }
+  .simple-btn{ width:100%; margin-top:12px; flex:none; font-weight:700; }
+  .simple-btn .simple-btn-icon{ font-size:17px; line-height:1; font-weight:700; }
+
+  .install-panel{
+    margin-top:12px; background:var(--paper-card); border:2px solid var(--ink);
+    border-radius:6px; padding:16px; text-align:left;
+    box-shadow:6px 6px 0 var(--shadow);
+  }
+  .install-panel[hidden]{ display:none; }
+  .install-panel-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .install-panel-title{
+    font-family:"Pirata One", serif; font-weight:400; font-size:24px; line-height:1.1; letter-spacing:.01em;
+  }
+  .install-panel-sub{ margin-top:3px; font-size:13.5px; line-height:1.45; color:var(--ink-2); }
+  .install-close{
+    flex:none; width:36px; height:36px; min-height:36px; border-radius:50%;
+    border:2px solid var(--ink); background:var(--paper-soft); color:var(--ink);
+    font-size:20px; line-height:1; cursor:pointer; display:grid; place-items:center; padding:0;
+  }
+  .install-progress{ margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .install-step-label{
+    font-family:"Special Elite", monospace; font-size:12px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--ink-2);
+  }
+  .install-dots{ display:inline-flex; gap:6px; }
+  .install-dot{ width:8px; height:8px; border-radius:50%; background:var(--line); }
+  .install-dot.is-active{ background:var(--red); }
+  .install-dot.is-done{ background:var(--ink); }
+  .install-step-card{
+    margin-top:10px; background:var(--paper-soft); border:2px solid var(--ink); border-radius:6px;
+    padding:18px 16px; display:flex; gap:14px; align-items:flex-start; min-height:96px;
+  }
+  .install-step-num{
+    flex:none; width:38px; height:38px; border-radius:50%;
+    background:var(--ink); color:var(--paper); font:18px/38px "Special Elite", monospace;
+    text-align:center;
+  }
+  .install-step-text{ margin:4px 0 0; font-size:17px; line-height:1.5; font-weight:500; color:var(--ink-2); }
+  .install-step-text strong{ color:var(--ink); }
+  .install-step-text .share-glyph{
+    display:inline-grid; place-items:center; width:22px; height:22px; vertical-align:-5px;
+    border:1.5px solid var(--ink); border-radius:5px; font-size:12px; line-height:1; color:var(--ink);
+    margin:0 2px; font-weight:700;
+  }
+  .install-actions{ display:flex; gap:12px; margin-top:12px; }
+  .install-back-btn{ flex:0 0 96px; }
+  .install-next-btn{
+    flex:1; border:2px solid var(--ink); border-radius:6px; cursor:pointer; min-height:48px;
+    background:var(--ink); color:var(--paper);
+    font:700 15px/1.2 "Barlow",sans-serif; letter-spacing:.03em;
+    display:flex; align-items:center; justify-content:center; padding:12px 10px;
+    box-shadow:5px 5px 0 var(--shadow);
+  }
+  .install-note{ margin:12px 0 0; font-size:13px; line-height:1.5; color:var(--ink-2); border-top:1px solid var(--line); padding-top:10px; }
+  .install-done{
+    margin-top:12px; background:var(--green-bg); border:2px solid var(--ink);
+    border-radius:6px; padding:11px 13px; font-size:14px; line-height:1.45; display:none;
+  }
+  .install-done.show{ display:block; }
+
+  .hint{ margin-top:16px; text-align:center; font-size:13px; line-height:1.55; color:var(--ink-2); }
+  .hint b{ color:var(--ink); }
+
+  /* ---------- Settings panel (shop sheet overlay) ---------- */
+  .panel-scrim{
+    position:fixed; inset:0; z-index:80;
+    background:rgba(0,0,0,.55);
+    display:flex; align-items:flex-start; justify-content:center;
+    padding:calc(14px + env(safe-area-inset-top)) 14px 14px;
+  }
+  .panel-scrim[hidden]{ display:none; }
+  .panel{
+    width:min(440px, 100%);
+    max-height:82dvh; overflow-y:auto;
+    background:var(--paper-card);
+    border:2.5px solid var(--ink); border-radius:6px;
+    box-shadow:10px 10px 0 rgba(0,0,0,.5);
+    padding:18px 18px 16px;
+    color:var(--ink);
+  }
+  .panel-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .panel-kicker{
+    font-family:"Special Elite", monospace; font-size:11.5px;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--red);
+  }
+  .panel-title{ font-family:"Pirata One", serif; font-size:31px; line-height:1.05; margin-top:2px; }
+  .panel-rule{ height:3px; background:var(--red); width:52px; margin-top:9px; }
+  .panel-close{
+    flex:none; width:40px; height:40px; min-height:40px; border-radius:50%;
+    border:2px solid var(--ink); background:var(--paper-soft); color:var(--ink);
+    font-size:22px; line-height:1; cursor:pointer; display:grid; place-items:center; padding:0;
+  }
+  .seg{
+    display:flex; margin-top:16px;
+    border:2px solid var(--ink); border-radius:6px; overflow:hidden;
+    background:var(--paper-soft);
+  }
+  .seg button{
+    flex:1; border:0; background:transparent; color:var(--ink-2);
+    font:700 15px/1 "Barlow",sans-serif; letter-spacing:.05em;
+    padding:0 6px; min-height:46px; cursor:pointer;
+  }
+  .seg button + button{ border-left:2px solid var(--ink); }
+  .seg button[aria-pressed="true"]{ background:var(--red); color:#FFF7E8; }
+  .seg button.kn{ flex:.55; }
+  .sect{
+    margin:20px 0 2px;
+    font-family:"Special Elite", monospace; font-size:12px;
+    letter-spacing:.18em; text-transform:uppercase; color:var(--red);
+    display:flex; align-items:center; gap:10px;
+  }
+  .sect::after{ content:""; flex:1; height:1px; background:var(--line); }
+  .prow{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    min-height:48px; padding:3px 0;
+    font-size:15.5px; font-weight:500;
+  }
+  .prow .val{
+    font-family:"Special Elite", monospace; font-size:15px; color:var(--red); white-space:nowrap;
+  }
+  .prow.dim{ opacity:.35; }
+  .prow input[type="range"]{
+    flex:1; accent-color:var(--red); height:44px; margin:0; min-width:0;
+  }
+  .prow .rng-wrap{ display:flex; align-items:center; gap:12px; flex:1; justify-content:flex-end; }
+  .switch{
+    flex:none; width:56px; height:32px; min-height:32px; border-radius:999px;
+    border:2px solid var(--ink); background:var(--paper-soft);
+    position:relative; cursor:pointer; padding:0;
+  }
+  .switch::after{
+    content:""; position:absolute; top:3px; left:3px; width:22px; height:22px;
+    border-radius:50%; background:var(--ink);
+    transition:left .18s ease, background .18s ease;
+  }
+  .switch[aria-checked="true"]{ background:var(--red); }
+  .switch[aria-checked="true"]::after{ left:27px; background:#FFF7E8; }
+  @media (prefers-reduced-motion: reduce){ .switch::after{ transition:none; } }
+  .swatches{ display:flex; gap:10px; padding:8px 0 2px; justify-content:space-between; }
+  .swatch{
+    width:38px; height:38px; min-height:38px; border-radius:50%;
+    border:2px solid var(--ink); cursor:pointer; padding:0; flex:none;
+    position:relative;
+  }
+  .swatch[aria-pressed="true"]{ box-shadow:0 0 0 3px var(--paper-card), 0 0 0 5.5px var(--ink); }
+  .panel-divider{ height:2px; background:var(--ink); opacity:.14; margin:16px 0 4px; }
+  .panel-action{
+    width:100%; border:0; background:transparent; cursor:pointer;
+    font:600 15.5px/1.2 "Barlow",sans-serif; color:var(--red);
+    min-height:48px; display:flex; align-items:center; justify-content:center;
+  }
+  .panel-action.neutral{ color:var(--ink); }
+  .panel-action[hidden]{ display:none; }
+  .panel-close-btn{
+    width:100%; margin-top:8px; border:2px solid var(--ink); border-radius:6px; cursor:pointer;
+    background:var(--red); color:#FFF7E8;
+    font:700 16px/1 "Barlow",sans-serif; letter-spacing:.05em; text-transform:uppercase;
+    min-height:50px; box-shadow:5px 5px 0 var(--ink);
+  }
+  .panel-close-btn:active{ transform:translate(2px,2px); box-shadow:3px 3px 0 var(--ink); }
+  .panel-status{
+    margin:12px 0 0; text-align:center;
+    font-family:"Special Elite", monospace; font-size:12.5px; color:var(--ink-2);
+  }
+  .panel-status[hidden]{ display:none; }
+
+  /* ---------- Simple view: the full-screen black face ---------- */
+  .simple-view{
+    position:fixed; inset:0; z-index:60;
+    background:#000; color:#F7F1DE;
+    overflow:hidden;
+    cursor:pointer; -webkit-tap-highlight-color:transparent;
+    touch-action:none;
+    user-select:none; -webkit-user-select:none;
+  }
+  .simple-view[hidden]{ display:none; }
+  .simple-view .ro-speed{ font-size:calc(clamp(140px, min(60vw, 52vh), 380px) * var(--spd-scale, 1)); }
+  .simple-view .ro-heading{ font-size:calc(24px * var(--lbl-scale, 1)); }
+  .simple-view .ro-max{ font-size:calc(21px * var(--lbl-scale, 1)); }
+  .simple-exit{
+    position:absolute; left:0; right:0;
+    bottom:calc(16px + env(safe-area-inset-bottom));
+    text-align:center;
+    font-family:"Special Elite", monospace;
+    font-size:11.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:#F7F1DE; opacity:.34;
+    pointer-events:none;
+  }
+
+  @media (orientation: landscape) and (max-height: 500px){
+    .stage{ min-height:290px; }
+    .ro-speed{ font-size:calc(clamp(96px, 30vh, 160px) * var(--spd-scale, 1)); }
+    .simple-view .ro-speed{ font-size:calc(clamp(120px, min(44vw, 62vh), 320px) * var(--spd-scale, 1)); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="gps-pill" id="gpsPill" role="status" aria-live="polite">
+      <span class="dot" id="gpsDot"></span>
+      <span id="gpsText">GPS off — tap Start for a fix</span>
+    </div>
+    <div class="top-right">
+      <span id="clockText">--:--</span><br>
+      <span>accuracy <strong id="accuracyText">—</strong></span>
+    </div>
+  </div>
+
+  <section class="stage" id="stage" aria-label="Speedometer face. Tap for settings, swipe up or down for brightness.">
+    <div class="drift-space" id="stageSpace">
+      <div class="ro-pos" id="stagePos">
+        <div class="ro-mirror" id="stageMirror">
+          <div class="ro-block outline" id="stageBlock">
+            <div class="ro-speed js-speed">0</div>
+            <div class="ro-line ro-heading js-heading" hidden></div>
+            <div class="ro-line ro-max js-max" hidden></div>
+            <div class="ro-line ro-search js-search" hidden>searching for GPS</div>
+          </div>
+        </div>
+      </div>
+      <div class="bright-ind side-left" id="stageBright" aria-hidden="true">
+        <div class="bright-track"><div class="bright-fill"></div></div>
+        <div class="bright-pct">80%</div>
+      </div>
+    </div>
+    <div class="stage-hint">Tap for settings · swipe ↕ brightness</div>
+  </section>
+
+  <div class="notice warn" id="noticeWarn" role="alert"></div>
+  <div class="notice error" id="noticeError" role="alert"></div>
+  <div class="notice info show" id="noticeInfo">
+    <strong>How it works:</strong> tap <strong>Start Ride</strong>, allow location, and mount the phone where you can glance at it. Speed comes straight from GPS — no wheel sensor, no account. The black face is easy on an OLED screen: the readout is hollow, shifts to a new spot every few minutes, and dims itself. Keep it plugged in on longer rides; GPS is thirsty.
+  </div>
+
+  <div class="stats" aria-label="Trip stats">
+    <div class="stat">
+      <div class="stat-label">Trip</div>
+      <div class="stat-value"><span id="tripValue">0.00</span><small id="tripUnit">mi</small></div>
+      <div class="stat-sub">Distance this ride</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Max speed</div>
+      <div class="stat-value"><span id="maxValue">0</span><small class="unitLabel">mph</small></div>
+      <div class="stat-sub">Fastest so far</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Average</div>
+      <div class="stat-value"><span id="avgValue">0</span><small class="unitLabel">mph</small></div>
+      <div class="stat-sub">Moving average</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Ride time</div>
+      <div class="stat-value" style="font-size:23px; padding-top:4px;" id="timeValue">0:00</div>
+      <div class="stat-sub" id="timeSub">Tap Start to begin</div>
+    </div>
+  </div>
+
+  <div class="secondary" aria-label="More data">
+    <div class="stat">
+      <div class="stat-label">Altitude</div>
+      <div class="stat-value"><span id="altValue">—</span><small id="altUnit"></small></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Heading</div>
+      <div class="stat-value"><span id="headingValue">—</span></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">GPS fixes</div>
+      <div class="stat-value"><span id="fixValue">0</span></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" class="main-btn" id="mainBtn">● &nbsp;Start Ride</button>
+    <button type="button" class="ghost-btn simple-btn" id="simpleBtn" aria-haspopup="true">
+      <span class="simple-btn-icon" aria-hidden="true">⛶</span> Simple view — speed only
+    </button>
+    <button type="button" class="ghost-btn install-btn" id="installBtn" aria-expanded="false" aria-controls="installPanel">
+      <span class="install-icon" aria-hidden="true">+</span> Add to Home Screen
+    </button>
+    <div class="install-done" id="installDone" role="status">Added — look for <strong>GPS Speedometer</strong> on your home screen. Open it from there next ride.</div>
+    <div class="install-panel" id="installPanel" hidden>
+      <div class="install-panel-head">
+        <div>
+          <div class="install-panel-title">Add to Home Screen</div>
+          <p class="install-panel-sub" id="installPanelSub">Three quick steps, one at a time.</p>
+        </div>
+        <button type="button" class="install-close" id="installClose" aria-label="Close walkthrough">×</button>
+      </div>
+      <div class="install-progress">
+        <span class="install-step-label" id="installStepLabel">Step 1 of 3</span>
+        <span class="install-dots" aria-hidden="true">
+          <span class="install-dot is-active" data-dot="0"></span>
+          <span class="install-dot" data-dot="1"></span>
+          <span class="install-dot" data-dot="2"></span>
+        </span>
+      </div>
+      <div class="install-step-card" aria-live="polite">
+        <div class="install-step-num" id="installStepNum">1</div>
+        <p class="install-step-text" id="installStepText">Tap the <strong>Share</strong> button at the bottom of Safari.</p>
+      </div>
+      <p class="install-note" id="installNote" hidden>On iPhone this only works in Safari — if you're viewing this inside another app, open it in Safari first.</p>
+      <div class="install-actions">
+        <button type="button" class="ghost-btn install-back-btn" id="installBack" disabled>Back</button>
+        <button type="button" class="install-next-btn" id="installNext">Next</button>
+      </div>
+    </div>
+    <div class="row-btns">
+      <button type="button" class="ghost-btn" id="wakeBtn" aria-pressed="false">☀ Keep screen awake</button>
+      <button type="button" class="ghost-btn" id="resetBtn" disabled>↺ Reset trip</button>
+    </div>
+    <p class="hint">Speed is GPS speed, so it lags a second or two behind the bike and drops to 0 in tunnels. If it reads 0 while you're moving, check that location is set to <b>Precise / High accuracy</b> and this page has permission. Don't interact with the phone while riding — glance only.</p>
+  </div>
+
+</div>
+
+<!-- Settings panel -->
+<div class="panel-scrim" id="panelScrim" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">Speedo · Shop Sheet Settings</div>
+        <div class="panel-title" id="panelTitle">GPS Speedometer</div>
+        <div class="panel-rule"></div>
+      </div>
+      <button type="button" class="panel-close" id="panelCloseX" aria-label="Close settings">×</button>
+    </div>
+
+    <div class="seg" role="group" aria-label="Speed units">
+      <button type="button" id="segMph" aria-pressed="true">MPH</button>
+      <button type="button" id="segKmh" aria-pressed="false">KM/H</button>
+      <button type="button" id="segKn" class="kn" aria-pressed="false" aria-label="Knots">KN</button>
+    </div>
+
+    <div class="prow">
+      <span>Brightness</span>
+      <span class="rng-wrap"><input type="range" id="rngBright" min="0" max="100" step="1" value="80" aria-label="Brightness percent"><span class="val" id="valBright">80%</span></span>
+    </div>
+
+    <div class="sect">Screen guard</div>
+    <div class="prow">
+      <span>Readout shifts position</span>
+      <button type="button" class="switch" id="swShift" role="switch" aria-checked="true" aria-label="Readout shifts position"></button>
+    </div>
+    <div class="prow" id="rowMove">
+      <span>Shift every</span>
+      <span class="rng-wrap"><input type="range" id="rngMove" min="1" max="10" step="1" value="3" aria-label="Shift every, minutes"><span class="val" id="valMove">3 min</span></span>
+    </div>
+
+    <div class="sect">Display</div>
+    <div class="swatches" id="swatches" role="group" aria-label="Readout colour"></div>
+    <div class="prow">
+      <span>Color drift</span>
+      <button type="button" class="switch" id="swDrift" role="switch" aria-checked="false" aria-label="Color drift"></button>
+    </div>
+    <div class="prow">
+      <span>Outline digits</span>
+      <button type="button" class="switch" id="swOutline" role="switch" aria-checked="true" aria-label="Outline digits"></button>
+    </div>
+    <div class="prow">
+      <span>Show max speed</span>
+      <button type="button" class="switch" id="swMax" role="switch" aria-checked="false" aria-label="Show max speed"></button>
+    </div>
+    <div class="prow">
+      <span>Show heading</span>
+      <button type="button" class="switch" id="swHeading" role="switch" aria-checked="false" aria-label="Show heading"></button>
+    </div>
+    <div class="prow">
+      <span>HUD mirror (windshield)</span>
+      <button type="button" class="switch" id="swMirror" role="switch" aria-checked="false" aria-label="HUD mirror for windshield reflection"></button>
+    </div>
+    <div class="prow">
+      <span>Speed size</span>
+      <span class="rng-wrap"><input type="range" id="rngSpeedSize" min="50" max="200" step="10" value="100" aria-label="Speed size percent"><span class="val" id="valSpeedSize">100%</span></span>
+    </div>
+    <div class="prow" id="rowLabelSize">
+      <span>Max / heading size</span>
+      <span class="rng-wrap"><input type="range" id="rngLabelSize" min="100" max="300" step="25" value="100" aria-label="Max and heading size percent"><span class="val" id="valLabelSize">100%</span></span>
+    </div>
+
+    <div class="panel-divider"></div>
+    <button type="button" class="panel-action" id="panelRideBtn">Start ride</button>
+    <button type="button" class="panel-action" id="resetMaxBtn">Reset max speed</button>
+    <button type="button" class="panel-action neutral" id="leaveSimpleBtn" hidden>Leave simple view</button>
+    <button type="button" class="panel-close-btn" id="panelCloseBtn">Close</button>
+    <p class="panel-status" id="panelStatus" hidden></p>
+  </div>
+</div>
+
+<!-- Simple view: full-screen black face -->
+<div class="simple-view" id="simpleView" hidden aria-label="Simple view. Tap for settings.">
+  <div class="drift-space" id="simpleSpace">
+    <div class="ro-pos" id="simplePos">
+      <div class="ro-mirror" id="simpleMirror">
+        <div class="ro-block outline" id="simpleBlock">
+          <div class="ro-speed js-speed">0</div>
+          <div class="ro-line ro-heading js-heading" hidden></div>
+          <div class="ro-line ro-max js-max" hidden></div>
+          <div class="ro-line ro-search js-search" hidden>searching for GPS</div>
+        </div>
+      </div>
+    </div>
+    <div class="bright-ind side-left" id="simpleBright" aria-hidden="true">
+      <div class="bright-track"><div class="bright-fill"></div></div>
+      <div class="bright-pct">80%</div>
+    </div>
+  </div>
+  <div class="simple-exit" aria-hidden="true">Tap for settings</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  function $(id){ return document.getElementById(id); }
+  var els = {
+    dot: $('gpsDot'), gpsText: $('gpsText'),
+    accuracy: $('accuracyText'), clock: $('clockText'),
+    trip: $('tripValue'), tripUnit: $('tripUnit'),
+    max: $('maxValue'), avg: $('avgValue'),
+    time: $('timeValue'), timeSub: $('timeSub'),
+    alt: $('altValue'), altUnit: $('altUnit'),
+    headingValue: $('headingValue'), fixes: $('fixValue'),
+    mainBtn: $('mainBtn'), wakeBtn: $('wakeBtn'), resetBtn: $('resetBtn'),
+    warn: $('noticeWarn'), err: $('noticeError'), info: $('noticeInfo'),
+    stage: $('stage'),
+    installBtn: $('installBtn'), installPanel: $('installPanel'),
+    installClose: $('installClose'), installDone: $('installDone'),
+    installPanelSub: $('installPanelSub'), installNote: $('installNote'),
+    installStepLabel: $('installStepLabel'), installStepNum: $('installStepNum'),
+    installStepText: $('installStepText'),
+    installBack: $('installBack'), installNext: $('installNext'),
+    installDots: document.querySelectorAll('.install-dot'),
+    simpleBtn: $('simpleBtn'), simpleView: $('simpleView'),
+    scrim: $('panelScrim'),
+    panelCloseX: $('panelCloseX'), panelCloseBtn: $('panelCloseBtn'),
+    panelStatus: $('panelStatus'),
+    segMph: $('segMph'), segKmh: $('segKmh'), segKn: $('segKn'),
+    rngBright: $('rngBright'), valBright: $('valBright'),
+    swShift: $('swShift'), rowMove: $('rowMove'), rngMove: $('rngMove'), valMove: $('valMove'),
+    swatches: $('swatches'),
+    swDrift: $('swDrift'), swOutline: $('swOutline'), swMax: $('swMax'),
+    swHeading: $('swHeading'), swMirror: $('swMirror'),
+    rngSpeedSize: $('rngSpeedSize'), valSpeedSize: $('valSpeedSize'),
+    rowLabelSize: $('rowLabelSize'), rngLabelSize: $('rngLabelSize'), valLabelSize: $('valLabelSize'),
+    panelRideBtn: $('panelRideBtn'), resetMaxBtn: $('resetMaxBtn'), leaveSimpleBtn: $('leaveSimpleBtn')
+  };
+
+  /* ---------- Settings (this session only) ---------- */
+  var SWATCHES = [
+    { name: 'Paper',  rgb: [247, 241, 222] },
+    { name: 'Red',    rgb: [255, 59, 48] },
+    { name: 'Orange', rgb: [255, 138, 61] },
+    { name: 'Yellow', rgb: [255, 214, 10] },
+    { name: 'Green',  rgb: [52, 199, 89] },
+    { name: 'Cyan',   rgb: [34, 211, 238] },
+    { name: 'Blue',   rgb: [64, 132, 255] }
+  ];
+  var cfg = {
+    unit: 'mph',          // 'mph' | 'kmh' | 'kn'
+    brightness: 80,       // 0..100
+    shift: true,          // readout shifts position (burn-in guard)
+    moveMin: 3,           // 1..10
+    colorIdx: 0,
+    drift: false,
+    outline: true,
+    showMax: false,
+    showHeading: false,
+    mirror: false,
+    speedScale: 100,      // 50..200
+    labelScale: 100       // 100..300
+  };
+
+  var UNITS = {
+    mph: { speed: 2.236936,  dist: function(m){ return m / 1609.344; }, distLabel: 'mi', alt: 3.28084, altLabel: ' ft', label: 'mph' },
+    kmh: { speed: 3.6,       dist: function(m){ return m / 1000; },     distLabel: 'km', alt: 1,       altLabel: ' m',  label: 'km/h' },
+    kn:  { speed: 1.943844,  dist: function(m){ return m / 1852; },     distLabel: 'nm', alt: 3.28084, altLabel: ' ft', label: 'kn' }
+  };
+  function U(){ return UNITS[cfg.unit]; }
+
+  /* ---------- Ride state ---------- */
+  var state = {
+    tracking: false, paused: false,
+    watchId: null,
+    lastPos: null, lastFixT: 0, hasFix: false, stale: false,
+    totalMeters: 0, maxMs: 0,
+    smoothKmh: 0,
+    fixes: 0,
+    elapsedBefore: 0, segmentStart: null, startStamp: null,
+    timerId: null,
+    headingDeg: null, altitudeM: null, accuracyM: null,
+    wakeLock: null, wakeWanted: false, simpleWake: false,
+    simpleMode: false,
+    permDenied: false, gpsOff: false
+  };
+
+  function cardinal(deg){
+    var dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(((deg % 360) / 45)) % 8];
+  }
+  function pad3(n){ n = Math.round(n); return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
+  function haversine(lat1, lon1, lat2, lon2){
+    var R = 6371000;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  function formatTime(ms){
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    return m + ':' + String(sec).padStart(2, '0');
+  }
+  function elapsedMs(){
+    if (!state.segmentStart || state.paused) return state.elapsedBefore;
+    return state.elapsedBefore + (Date.now() - state.segmentStart);
+  }
+  function currentSpeedValue(){
+    return (state.smoothKmh / 3.6) * U().speed;
+  }
+
+  /* ---------- Colour: presets + slow drift ---------- */
+  function rgbToHsl(r, g, b){
+    r /= 255; g /= 255; b /= 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, h = 0, s = 0;
+    if (mx !== mn){
+      var d = mx - mn;
+      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      if (mx === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s, l];
+  }
+  function readoutColor(){
+    var base = SWATCHES[cfg.colorIdx].rgb;
+    if (!cfg.drift) return 'rgb(' + base[0] + ',' + base[1] + ',' + base[2] + ')';
+    var hsl = rgbToHsl(base[0], base[1], base[2]);
+    var t = (performance.now() / 1000) % 720; // 12-minute cycle
+    var hue, sat = hsl[1], light = hsl[2];
+    if (hsl[1] < 0.05){
+      hue = (t / 720 * 360) % 360; sat = 0.20; light = 0.93;
+    } else {
+      hue = hsl[0] + 20 * Math.sin(t / 720 * 2 * Math.PI);
+    }
+    return 'hsl(' + hue.toFixed(1) + ',' + Math.round(sat * 100) + '%,' + Math.round(light * 100) + '%)';
+  }
+
+  /* ---------- Readout boxes: stage + simple view ---------- */
+  function makeBox(spaceId, posId, mirrorId, blockId, brightId){
+    return {
+      space: $(spaceId), pos: $(posId), mirror: $(mirrorId), block: $(blockId), bright: $(brightId),
+      speedEl: $(blockId).querySelector('.js-speed'),
+      headingEl: $(blockId).querySelector('.js-heading'),
+      maxEl: $(blockId).querySelector('.js-max'),
+      searchEl: $(blockId).querySelector('.js-search'),
+      fillEl: $(brightId).querySelector('.bright-fill'),
+      pctEl: $(brightId).querySelector('.bright-pct'),
+      x: 0, y: 0, anim: null, brightTimer: null
+    };
+  }
+  var boxes = [
+    makeBox('stageSpace', 'stagePos', 'stageMirror', 'stageBlock', 'stageBright'),
+    makeBox('simpleSpace', 'simplePos', 'simpleMirror', 'simpleBlock', 'simpleBright')
+  ];
+
+  function slot(step, a){
+    var f = (0.5 + a * step) % 1;
+    if (f < 0) f += 1;
+    return f * 2 - 1;
+  }
+  function boxTarget(box, step){
+    if (!cfg.shift) return { x: 0, y: 0 };
+    var cw = box.space.clientWidth, ch = box.space.clientHeight;
+    var bw = box.block.offsetWidth, bh = box.block.offsetHeight;
+    var margin = 0.03 * Math.min(cw, ch);
+    var sx = Math.max(0, (cw - bw) / 2 - margin);
+    var sy = Math.max(0, (ch - bh) / 2 - margin);
+    return { x: slot(step, 0.7548776) * sx, y: slot(step, 0.5698403) * sy };
+  }
+  function placeBox(box){
+    box.pos.style.transform = 'translate(-50%,-50%) translate(' + box.x.toFixed(1) + 'px,' + box.y.toFixed(1) + 'px)';
+  }
+  function glideBox(box, to){
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      box.x = to.x; box.y = to.y; box.anim = null; placeBox(box); return;
+    }
+    box.anim = { fx: box.x, fy: box.y, tx: to.x, ty: to.y, t0: performance.now(), dur: 1100 };
+    requestAnimationFrame(glideStep);
+  }
+  function glideStep(now){
+    var any = false;
+    boxes.forEach(function(box){
+      var a = box.anim; if (!a) return;
+      var k = Math.min(1, (now - a.t0) / a.dur);
+      var e = k * k * (3 - 2 * k); // smoothstep
+      box.x = a.fx + (a.tx - a.fx) * e;
+      box.y = a.fy + (a.ty - a.fy) * e;
+      if (k >= 1) box.anim = null; else any = true;
+      placeBox(box);
+    });
+    if (any) requestAnimationFrame(glideStep);
+  }
+  var shiftStep = -1;
+  function shiftTick(){
+    var step = Math.floor((performance.now() / 1000) / (cfg.moveMin * 60));
+    if (step !== shiftStep){
+      shiftStep = step;
+      boxes.forEach(function(box){ glideBox(box, boxTarget(box, step)); });
+    }
+  }
+
+  /* ---------- Brightness ---------- */
+  function brightnessFactor(){ return 0.08 + (cfg.brightness / 100) * 0.92; }
+  function applyBrightness(){
+    var f = 'brightness(' + brightnessFactor().toFixed(3) + ')';
+    boxes.forEach(function(box){
+      box.block.style.filter = f;
+      box.fillEl.style.height = cfg.brightness + '%';
+      box.pctEl.textContent = cfg.brightness + '%';
+      box.pctEl.style.bottom = cfg.brightness + '%';
+    });
+    els.valBright.textContent = cfg.brightness + '%';
+    if (document.activeElement !== els.rngBright) els.rngBright.value = String(cfg.brightness);
+  }
+  function flashBrightness(box){
+    // Put the bar on whichever side leaves it clear of the readout block
+    var spaceRect = box.space.getBoundingClientRect();
+    var blockRect = box.block.getBoundingClientRect();
+    var leftClear = blockRect.left - spaceRect.left;
+    var rightClear = spaceRect.right - blockRect.right;
+    var sideLeft = leftClear >= rightClear;
+    box.bright.classList.toggle('side-left', sideLeft);
+    box.bright.classList.toggle('side-right', !sideLeft);
+    box.bright.style.transition = 'opacity .15s linear';
+    box.bright.classList.add('show');
+    if (box.brightTimer) clearTimeout(box.brightTimer);
+    box.brightTimer = setTimeout(function(){
+      box.bright.style.transition = 'opacity .4s linear';
+      box.bright.classList.remove('show');
+    }, 500);
+  }
+
+  /* ---------- Render ---------- */
+  function showNotice(kind, html){
+    els.warn.className = 'notice warn'; els.err.className = 'notice error';
+    els.warn.innerHTML = ''; els.err.innerHTML = '';
+    if (!html) return;
+    if (kind === 'warn'){ els.warn.innerHTML = html; els.warn.classList.add('show'); }
+    if (kind === 'error'){ els.err.innerHTML = html; els.err.classList.add('show'); }
+  }
+  function setGpsStatus(mode, text){
+    els.dot.className = 'dot' + (mode ? ' ' + mode : '');
+    els.gpsText.textContent = text;
+  }
+  function render(){
+    var speedText = String(Math.round(currentSpeedValue()));
+    var maxText = String(Math.round((state.maxMs) * U().speed));
+    var showHeadingLine = cfg.showHeading && state.hasFix && state.headingDeg != null;
+    var headingLine = showHeadingLine ? cardinal(state.headingDeg) + ' ' + pad3(state.headingDeg) + '°' : '';
+    var showMaxLine = cfg.showMax && state.maxMs * U().speed >= 0.5;
+    var searching = state.tracking && !state.hasFix;
+
+    boxes.forEach(function(box){
+      box.speedEl.textContent = speedText;
+      box.headingEl.hidden = !showHeadingLine;
+      if (showHeadingLine) box.headingEl.textContent = headingLine;
+      box.maxEl.hidden = !showMaxLine;
+      if (showMaxLine) box.maxEl.textContent = 'max ' + maxText;
+      box.searchEl.hidden = !searching;
+      box.block.classList.toggle('outline', cfg.outline);
+      box.block.classList.toggle('stale', state.stale && state.smoothKmh > 0.4);
+      box.block.style.setProperty('--spd-scale', String(cfg.speedScale / 100));
+      box.block.style.setProperty('--lbl-scale', String(cfg.labelScale / 100));
+      box.mirror.style.transform = cfg.mirror ? 'scaleX(-1)' : '';
+    });
+
+    var d = U().dist(state.totalMeters);
+    els.trip.textContent = d < 10 ? d.toFixed(2) : d < 100 ? d.toFixed(1) : Math.round(d).toString();
+    els.tripUnit.textContent = U().distLabel;
+    els.max.textContent = maxText;
+    els.avg.textContent = String(Math.round(avgSpeedValue()));
+    document.querySelectorAll('.unitLabel').forEach(function(n){ n.textContent = U().label; });
+
+    var elapsed = elapsedMs();
+    els.time.textContent = formatTime(elapsed);
+    els.timeSub.textContent = state.tracking ? 'Rolling' : (state.paused && elapsed > 0 ? 'Paused' : (elapsed > 0 ? 'Stopped — tap Start to resume' : 'Tap Start to begin'));
+
+    els.headingValue.textContent = state.headingDeg != null ? cardinal(state.headingDeg) + ' ' + Math.round(state.headingDeg) + '°' : '—';
+    if (state.altitudeM != null){
+      els.alt.textContent = Math.round(state.altitudeM * U().alt).toLocaleString();
+      els.altUnit.textContent = U().altLabel;
+    } else { els.alt.textContent = '—'; els.altUnit.textContent = ''; }
+    els.fixes.textContent = String(state.fixes);
+    els.accuracy.textContent = state.accuracyM != null
+      ? (cfg.unit === 'kmh' ? Math.round(state.accuracyM) + ' m' : Math.round(state.accuracyM * 3.28084) + ' ft')
+      : '—';
+    els.resetBtn.disabled = !(state.totalMeters > 0 || elapsed > 0 || state.maxMs > 0);
+    els.panelRideBtn.textContent = state.tracking ? 'Stop ride' : (state.paused && elapsed > 0 ? 'Resume ride' : 'Start ride');
+  }
+  function avgSpeedValue(){
+    var elapsed = elapsedMs();
+    if (elapsed > 3000 && state.totalMeters > 5) return (state.totalMeters / (elapsed / 1000)) * U().speed;
+    return 0;
+  }
+
+  function updateClock(){
+    var now = new Date();
+    var h = now.getHours(), m = String(now.getMinutes()).padStart(2, '0');
+    var ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    els.clock.textContent = h + ':' + m + ' ' + ampm;
+  }
+  updateClock(); setInterval(updateClock, 15000);
+
+  /* ---------- GPS ---------- */
+  function onPosition(pos){
+    state.fixes++;
+    state.hasFix = true; state.stale = false;
+    state.lastFixT = Date.now();
+    state.permDenied = false; state.gpsOff = false;
+    var c = pos.coords;
+    state.accuracyM = c.accuracy != null ? c.accuracy : null;
+    state.altitudeM = c.altitude != null ? c.altitude : state.altitudeM;
+
+    var now = pos.timestamp || Date.now();
+    var kmh = null;
+    if (c.speed != null && !isNaN(c.speed) && c.speed >= 0){
+      kmh = c.speed * 3.6;
+    } else if (state.lastPos){
+      var dt = (now - state.lastPos.t) / 1000;
+      if (dt > 0.5 && dt < 10){
+        var dd = haversine(state.lastPos.lat, state.lastPos.lon, c.latitude, c.longitude);
+        kmh = dd > 1 ? (dd / dt) * 3.6 : 0;
+      }
+    }
+    if (kmh == null) kmh = 0;
+    if (kmh < 1.5) kmh = 0; // GPS drift while parked is not motion
+    state.smoothKmh += (kmh - state.smoothKmh) * 0.45;
+    if (state.smoothKmh < 0.4) state.smoothKmh = 0;
+
+    var smoothMs = state.smoothKmh / 3.6;
+    if (smoothMs > state.maxMs) state.maxMs = smoothMs;
+
+    // Heading only counts while actually rolling — no flicker while parked
+    if (c.heading != null && !isNaN(c.heading) && state.smoothKmh >= 5) state.headingDeg = c.heading;
+    else if (state.smoothKmh < 5) state.headingDeg = null;
+
+    if (state.lastPos && state.tracking && !state.paused){
+      var dist = haversine(state.lastPos.lat, state.lastPos.lon, c.latitude, c.longitude);
+      var dt2 = (now - state.lastPos.t) / 1000;
+      var acc = c.accuracy || 20;
+      if (dist > 2 && dist < 500 && dt2 > 0 && dt2 < 15){
+        var implied = dist / dt2;
+        if (implied < 90 && !(smoothMs < 0.7 && dist < acc * 0.6)){
+          state.totalMeters += dist;
+        }
+      }
+    }
+    state.lastPos = { lat: c.latitude, lon: c.longitude, t: now };
+
+    if (state.accuracyM != null && state.accuracyM > 65){
+      showNotice('warn', '<strong>Weak GPS.</strong> Accuracy is about ' + Math.round(state.accuracyM * 3.28084) + ' ft right now — speed may jump around. Open sky helps; keep the phone out of a pocket or bag.');
+    } else if (els.warn.classList.contains('show') && els.warn.textContent.indexOf('Weak GPS') !== -1){
+      showNotice('', '');
+    }
+    setGpsStatus('live', 'GPS live · ±' + (state.accuracyM ? Math.round(state.accuracyM * 3.28084) + ' ft' : '—'));
+    els.info.classList.remove('show');
+    render();
+  }
+  function onError(err){
+    var msg = '';
+    if (err.code === 1){
+      msg = '<strong>Location is blocked.</strong> Allow location for this page in your browser / phone settings, set it to <strong>Precise</strong>, then tap Start Ride again.';
+      setGpsStatus('error', 'Location blocked');
+      state.permDenied = true;
+    } else if (err.code === 2){
+      msg = '<strong>GPS unavailable.</strong> The phone couldn\'t get a fix. Move to open sky and try again.';
+      setGpsStatus('error', 'GPS unavailable');
+      state.gpsOff = true;
+    } else if (err.code === 3){
+      msg = '<strong>GPS timed out</strong> finding a fix. Tap Start Ride again — the second try is usually faster.';
+      setGpsStatus('searching', 'GPS timed out — retry');
+    } else {
+      msg = '<strong>Location error.</strong> ' + (err.message || 'Try again.');
+      setGpsStatus('error', 'Location error');
+    }
+    showNotice('error', msg);
+    render();
+  }
+  // Watchdog: a fix older than 4 s dims the readout; older than 20 s the fix is dropped
+  setInterval(function(){
+    if (!state.tracking || !state.lastFixT) return;
+    var age = Date.now() - state.lastFixT;
+    if (age > 20000 && state.hasFix){
+      state.hasFix = false; state.smoothKmh = 0; state.stale = false;
+      setGpsStatus('searching', 'Finding GPS…');
+      render();
+    } else if (age > 4000 && !state.stale && state.hasFix){
+      state.stale = true; render();
+    }
+  }, 1000);
+
+  function startTimer(){
+    if (state.timerId) return;
+    state.timerId = setInterval(function(){ if (state.tracking && !state.paused) render(); }, 500);
+  }
+  function stopTimer(){ if (state.timerId){ clearInterval(state.timerId); state.timerId = null; } }
+
+  function startTracking(){
+    if (!('geolocation' in navigator)){
+      showNotice('error', '<strong>No GPS on this device / browser.</strong> Open this page on your phone with location services on.');
+      return;
+    }
+    showNotice('', '');
+    setGpsStatus('searching', 'Finding GPS…');
+    els.info.classList.remove('show');
+    if (state.watchId == null){
+      state.watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true, maximumAge: 0, timeout: 20000
+      });
+    }
+    if (!state.tracking){
+      state.tracking = true; state.paused = false;
+      state.segmentStart = Date.now();
+      if (!state.startStamp) state.startStamp = Date.now();
+    } else if (state.paused){
+      state.paused = false; state.segmentStart = Date.now();
+    }
+    startTimer();
+    els.mainBtn.textContent = '■  Stop';
+    els.mainBtn.classList.add('is-stop');
+    if (state.wakeWanted) requestWake();
+    render();
+  }
+  function stopTracking(){
+    if (state.segmentStart){ state.elapsedBefore = elapsedMs(); state.segmentStart = null; }
+    state.paused = true; state.tracking = false;
+    els.mainBtn.innerHTML = '● &nbsp;Resume Ride';
+    els.mainBtn.classList.remove('is-stop');
+    setGpsStatus(state.fixes > 0 ? 'live' : '', state.fixes > 0 ? 'Paused — GPS still on' : 'GPS off — tap Start for a fix');
+    stopTimer();
+    render();
+  }
+  els.mainBtn.addEventListener('click', function(){
+    if (state.tracking) stopTracking(); else startTracking();
+  });
+  els.resetBtn.addEventListener('click', function(){
+    state.totalMeters = 0; state.maxMs = 0; state.smoothKmh = 0;
+    state.elapsedBefore = 0;
+    state.segmentStart = state.tracking ? Date.now() : null;
+    state.startStamp = state.tracking ? Date.now() : null;
+    state.fixes = 0;
+    showNotice('', '');
+    if (!state.tracking) setGpsStatus('', 'GPS off — tap Start for a fix');
+    render();
+  });
+
+  /* ---------- Wake lock ---------- */
+  function requestWake(){
+    if (!('wakeLock' in navigator)){
+      els.wakeBtn.textContent = 'Keep awake not supported';
+      els.wakeBtn.disabled = true;
+      return;
+    }
+    navigator.wakeLock.request('screen').then(function(lock){
+      state.wakeLock = lock;
+      els.wakeBtn.setAttribute('aria-pressed', 'true');
+      els.wakeBtn.textContent = '☀ Screen awake: ON';
+      lock.addEventListener('release', function(){
+        state.wakeLock = null;
+        if (!state.wakeWanted){
+          els.wakeBtn.setAttribute('aria-pressed', 'false');
+          els.wakeBtn.textContent = '☀ Keep screen awake';
+        }
+      });
+    }).catch(function(){
+      state.wakeWanted = false;
+      els.wakeBtn.setAttribute('aria-pressed', 'false');
+    });
+  }
+  function releaseWake(){
+    if (state.wakeLock){ try { state.wakeLock.release(); } catch (e) {} state.wakeLock = null; }
+    els.wakeBtn.setAttribute('aria-pressed', 'false');
+    els.wakeBtn.textContent = '☀ Keep screen awake';
+  }
+  els.wakeBtn.addEventListener('click', function(){
+    state.wakeWanted = !state.wakeWanted;
+    if (state.wakeWanted) requestWake(); else releaseWake();
+  });
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible' && (state.wakeWanted || state.simpleMode)) requestWake();
+  });
+
+  /* ---------- Settings panel ---------- */
+  var panelTimer = null;
+  function panelIsOpen(){ return !els.scrim.hidden; }
+  function resetPanelTimer(){
+    if (panelTimer) clearTimeout(panelTimer);
+    // The panel is the one static thing on a burn-in-guarded screen — it hides itself
+    panelTimer = setTimeout(closePanel, 15000);
+  }
+  function updatePanelStatus(){
+    var msg = '';
+    if (state.permDenied) msg = 'Location permission denied';
+    else if (state.gpsOff) msg = 'GPS is off. Turn on Location';
+    els.panelStatus.textContent = msg;
+    els.panelStatus.hidden = !msg;
+  }
+  function openPanel(){
+    updatePanelStatus();
+    els.leaveSimpleBtn.hidden = !state.simpleMode;
+    els.scrim.hidden = false;
+    resetPanelTimer();
+    render();
+  }
+  function closePanel(){
+    els.scrim.hidden = true;
+    if (panelTimer){ clearTimeout(panelTimer); panelTimer = null; }
+  }
+  els.panelCloseX.addEventListener('click', closePanel);
+  els.panelCloseBtn.addEventListener('click', closePanel);
+  els.scrim.addEventListener('pointerdown', function(e){
+    if (e.target === els.scrim) closePanel(); else resetPanelTimer();
+  });
+  els.scrim.addEventListener('change', resetPanelTimer);
+  els.scrim.addEventListener('input', resetPanelTimer);
+
+  function setSwitch(el, on){ el.setAttribute('aria-checked', on ? 'true' : 'false'); }
+  function bindSwitch(el, get, set){
+    el.addEventListener('click', function(){ set(!get()); resetPanelTimer(); });
+  }
+  function refreshPanel(){
+    els.segMph.setAttribute('aria-pressed', cfg.unit === 'mph' ? 'true' : 'false');
+    els.segKmh.setAttribute('aria-pressed', cfg.unit === 'kmh' ? 'true' : 'false');
+    els.segKn.setAttribute('aria-pressed', cfg.unit === 'kn' ? 'true' : 'false');
+    setSwitch(els.swShift, cfg.shift);
+    setSwitch(els.swDrift, cfg.drift);
+    setSwitch(els.swOutline, cfg.outline);
+    setSwitch(els.swMax, cfg.showMax);
+    setSwitch(els.swHeading, cfg.showHeading);
+    setSwitch(els.swMirror, cfg.mirror);
+    els.rowMove.classList.toggle('dim', !cfg.shift);
+    els.rngMove.disabled = !cfg.shift;
+    var labelsOn = cfg.showMax || cfg.showHeading;
+    els.rowLabelSize.classList.toggle('dim', !labelsOn);
+    els.rngLabelSize.disabled = !labelsOn;
+    els.valMove.textContent = cfg.moveMin + ' min';
+    els.valSpeedSize.textContent = cfg.speedScale + '%';
+    els.valLabelSize.textContent = cfg.labelScale + '%';
+    els.swatches.querySelectorAll('.swatch').forEach(function(sw, i){
+      sw.setAttribute('aria-pressed', i === cfg.colorIdx ? 'true' : 'false');
+    });
+    applyBrightness();
+  }
+  function setUnit(u){ cfg.unit = u; refreshPanel(); render(); }
+  els.segMph.addEventListener('click', function(){ setUnit('mph'); });
+  els.segKmh.addEventListener('click', function(){ setUnit('kmh'); });
+  els.segKn.addEventListener('click', function(){ setUnit('kn'); });
+
+  els.rngBright.addEventListener('input', function(){
+    cfg.brightness = parseInt(els.rngBright.value, 10);
+    applyBrightness();
+  });
+  els.rngMove.addEventListener('input', function(){
+    cfg.moveMin = parseInt(els.rngMove.value, 10);
+    shiftStep = -1; shiftTick();
+    refreshPanel();
+  });
+  els.rngSpeedSize.addEventListener('input', function(){
+    cfg.speedScale = parseInt(els.rngSpeedSize.value, 10);
+    refreshPanel(); render();
+    shiftStep = -1; shiftTick();
+  });
+  els.rngLabelSize.addEventListener('input', function(){
+    cfg.labelScale = parseInt(els.rngLabelSize.value, 10);
+    refreshPanel(); render();
+  });
+  bindSwitch(els.swShift, function(){ return cfg.shift; }, function(v){
+    cfg.shift = v; refreshPanel(); shiftStep = -1; shiftTick();
+  });
+  bindSwitch(els.swDrift, function(){ return cfg.drift; }, function(v){ cfg.drift = v; refreshPanel(); });
+  bindSwitch(els.swOutline, function(){ return cfg.outline; }, function(v){ cfg.outline = v; refreshPanel(); render(); });
+  bindSwitch(els.swMax, function(){ return cfg.showMax; }, function(v){ cfg.showMax = v; refreshPanel(); render(); });
+  bindSwitch(els.swHeading, function(){ return cfg.showHeading; }, function(v){ cfg.showHeading = v; refreshPanel(); render(); });
+  bindSwitch(els.swMirror, function(){ return cfg.mirror; }, function(v){ cfg.mirror = v; refreshPanel(); render(); });
+
+  // Colour swatches
+  SWATCHES.forEach(function(sw, i){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.style.background = 'rgb(' + sw.rgb[0] + ',' + sw.rgb[1] + ',' + sw.rgb[2] + ')';
+    b.setAttribute('aria-label', sw.name + ' readout');
+    b.setAttribute('aria-pressed', i === cfg.colorIdx ? 'true' : 'false');
+    b.addEventListener('click', function(){
+      cfg.colorIdx = i; refreshPanel(); resetPanelTimer();
+    });
+    els.swatches.appendChild(b);
+  });
+
+  els.resetMaxBtn.addEventListener('click', function(){
+    state.maxMs = 0; render(); resetPanelTimer();
+  });
+  els.panelRideBtn.addEventListener('click', function(){
+    if (state.tracking) stopTracking(); else startTracking();
+    updatePanelStatus(); resetPanelTimer(); render();
+  });
+  els.leaveSimpleBtn.addEventListener('click', function(){
+    closePanel(); exitSimpleView();
+  });
+
+  /* ---------- Stage / simple-view gestures: tap = settings, vertical swipe = brightness ---------- */
+  function attachGestures(el, box){
+    var startX = 0, startY = 0, baseBright = 80, dragging = false, moved = false, active = false;
+    el.addEventListener('pointerdown', function(e){
+      active = true; dragging = false; moved = false;
+      startX = e.clientX; startY = e.clientY; baseBright = cfg.brightness;
+    });
+    el.addEventListener('pointermove', function(e){
+      if (!active) return;
+      var dx = e.clientX - startX, dy = e.clientY - startY;
+      if (!dragging){
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx) * 1.5 && !panelIsOpen()){
+          dragging = true; moved = true;
+        } else if (Math.abs(dx) > 10 || Math.abs(dy) > 10){
+          moved = true;
+        }
+      }
+      if (dragging){
+        var h = el.clientHeight || window.innerHeight;
+        var p = Math.round(baseBright + ((startY - e.clientY) / (0.6 * h)) * 100);
+        cfg.brightness = Math.max(0, Math.min(100, p));
+        applyBrightness();
+        flashBrightness(box);
+      }
+    });
+    function end(e){
+      if (!active) return;
+      active = false;
+      if (!dragging && !moved){
+        // A real tap toggles the settings panel
+        if (panelIsOpen()) closePanel(); else openPanel();
+      }
+      dragging = false;
+    }
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', function(){ active = false; dragging = false; });
+  }
+  attachGestures(els.stage, boxes[0]);
+  attachGestures(els.simpleView, boxes[1]);
+
+  /* ---------- Simple view ---------- */
+  function enterSimpleView(){
+    if (state.simpleMode) return;
+    state.simpleMode = true;
+    els.simpleView.hidden = false;
+    document.body.style.overflow = 'hidden';
+    shiftStep = -1; shiftTick();
+    render();
+    if ('wakeLock' in navigator && !state.wakeLock){
+      state.simpleWake = true; requestWake();
+    }
+    try {
+      if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function(){});
+    } catch (e) {}
+  }
+  function exitSimpleView(){
+    if (!state.simpleMode) return;
+    state.simpleMode = false;
+    els.simpleView.hidden = true;
+    document.body.style.overflow = '';
+    if (state.simpleWake && !state.wakeWanted){ releaseWake(); }
+    state.simpleWake = false;
+    try { if (document.fullscreenElement) document.exitFullscreen().catch(function(){}); } catch (e) {}
+    render();
+    if (els.simpleBtn){ try { els.simpleBtn.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  els.simpleBtn.addEventListener('click', enterSimpleView);
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    if (panelIsOpen()) closePanel();
+    else if (state.simpleMode) exitSimpleView();
+  });
+
+  /* ---------- Add to Home Screen ---------- */
+  var deferredInstallPrompt = null;
+  function isStandalone(){
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }
+  function isIOS(){
+    var ua = window.navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+  }
+  function isAndroid(){ return /Android/i.test(window.navigator.userAgent || ''); }
+  var INSTALL_STEPS = {
+    ios: [
+      'Tap the <strong>Share</strong> button <span class="share-glyph" aria-hidden="true">\u2191</span> at the bottom of Safari.',
+      'Tap <strong>Add to Home Screen</strong> in the share sheet.',
+      'Tap <strong>Add</strong> in the top corner.'
+    ],
+    android: [
+      'Tap the <strong>Add to Home Screen</strong> button, or open Chrome\u2019s <strong>\u22EE menu</strong> and tap <strong>Add to Home screen</strong>.',
+      'Tap <strong>Install</strong> or <strong>Add</strong> on the prompt.',
+      'Find the <strong>GPS Speedometer</strong> icon on your home screen and open it.'
+    ],
+    generic: [
+      'Open your browser\u2019s <strong>Share</strong> or <strong>\u22EE menu</strong>.',
+      'Tap <strong>Add to Home Screen</strong> or <strong>Install app</strong>.',
+      'Tap <strong>Add</strong>, then open it from your home screen.'
+    ]
+  };
+  var installStepIndex = 0;
+  var installStepSet = INSTALL_STEPS.generic;
+  function hideInstallPanel(){
+    if (!els.installPanel) return;
+    els.installPanel.hidden = true;
+    installStepIndex = 0;
+    if (els.installBtn) els.installBtn.setAttribute('aria-expanded', 'false');
+  }
+  function renderInstallStep(){
+    els.installStepLabel.textContent = 'Step ' + (installStepIndex + 1) + ' of 3';
+    els.installStepNum.textContent = String(installStepIndex + 1);
+    els.installStepText.innerHTML = installStepSet[installStepIndex];
+    els.installDots.forEach(function(dot, i){
+      dot.classList.toggle('is-active', i === installStepIndex);
+      dot.classList.toggle('is-done', i < installStepIndex);
+    });
+    els.installBack.disabled = installStepIndex === 0;
+    els.installNext.textContent = installStepIndex === 2 ? 'Done' : 'Next';
+  }
+  function showInstallInstructions(){
+    if (!els.installPanel) return;
+    var ios = isIOS(), android = isAndroid();
+    installStepSet = ios ? INSTALL_STEPS.ios : (android ? INSTALL_STEPS.android : INSTALL_STEPS.generic);
+    installStepIndex = 0;
+    els.installPanelSub.textContent = ios
+      ? 'Three quick steps in Safari, one at a time.'
+      : (android ? 'Three quick steps in Chrome, one at a time.' : 'Three quick steps, one at a time.');
+    els.installNote.hidden = !ios;
+    renderInstallStep();
+    els.installPanel.hidden = false;
+    els.installBtn.setAttribute('aria-expanded', 'true');
+    try { els.installPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+  }
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    if (els.installBtn && !isStandalone()) els.installBtn.hidden = false;
+  });
+  window.addEventListener('appinstalled', function(){
+    deferredInstallPrompt = null;
+    hideInstallPanel();
+    if (els.installBtn) els.installBtn.hidden = true;
+    if (els.installDone) els.installDone.classList.add('show');
+  });
+  if (els.installBtn){
+    if (isStandalone()) els.installBtn.hidden = true;
+    els.installBtn.addEventListener('click', function(){
+      if (!deferredInstallPrompt && els.installPanel && !els.installPanel.hidden){
+        hideInstallPanel();
+        return;
+      }
+      if (deferredInstallPrompt){
+        var deferredEvent = deferredInstallPrompt;
+        deferredInstallPrompt = null;
+        try {
+          var showNativeInstall = deferredEvent.prompt;
+          showNativeInstall.call(deferredEvent);
+          if (deferredEvent.userChoice && typeof deferredEvent.userChoice.then === 'function'){
+            deferredEvent.userChoice.then(function(choice){
+              if (choice && choice.outcome === 'accepted'){
+                hideInstallPanel();
+                if (els.installDone) els.installDone.classList.add('show');
+              } else {
+                showInstallInstructions();
+              }
+            }).catch(function(){ showInstallInstructions(); });
+          }
+        } catch (err){
+          showInstallInstructions();
+        }
+        return;
+      }
+      showInstallInstructions();
+    });
+  }
+  if (els.installClose) els.installClose.addEventListener('click', hideInstallPanel);
+  if (els.installBack){
+    els.installBack.addEventListener('click', function(){
+      if (installStepIndex > 0){ installStepIndex--; renderInstallStep(); }
+    });
+  }
+  if (els.installNext){
+    els.installNext.addEventListener('click', function(){
+      if (installStepIndex < 2){ installStepIndex++; renderInstallStep(); }
+      else hideInstallPanel();
+    });
+  }
+
+  /* ---------- Engine: drift colour + readout shifting, 4× a second ---------- */
+  setInterval(function(){
+    document.documentElement.style.setProperty('--ro-color', readoutColor());
+    shiftTick();
+  }, 250);
+  window.addEventListener('resize', function(){ shiftStep = -1; shiftTick(); });
+
+  boxes.forEach(placeBox);
+  refreshPanel();
+  applyBrightness();
+  render();
+})();
+</script>
+</body>
+</html>
