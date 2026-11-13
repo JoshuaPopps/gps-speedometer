@@ -396,7 +396,7 @@
   <div class="notice warn" id="noticeWarn" role="alert"></div>
   <div class="notice error" id="noticeError" role="alert"></div>
   <div class="notice info show" id="noticeInfo">
-    <strong>How it works, like Roam:</strong> tap <strong>Start Ride</strong>, allow location, and mount the phone where you can glance at it. Speed comes straight from GPS — no wheel sensor, no account. Keep it plugged in on longer rides; GPS is thirsty.
+    <strong>How it works:</strong> tap <strong>Start Ride</strong>, allow location, and mount the phone where you can glance at it. Speed comes straight from GPS — no wheel sensor, no account. Keep it plugged in on longer rides; GPS is thirsty.
   </div>
 
   <div class="stats" aria-label="Trip stats">
@@ -616,7 +616,7 @@
     // speed — smoothed
     var dispMs = state.currentMs;
     var spd = toSpeed(dispMs);
-    // Show integer, like Roam
+    // Show integer
     var speedText = String(Math.round(spd));
     els.speed.textContent = speedText;
     els.speedUnit.textContent = state.unit;
@@ -808,7 +808,7 @@
 
   function stopTracking(){
     // Pause the clock, keep the watch so speed stays live when stopped at a light?
-    // Roam-like behavior: Stop ends the segment but keeps last stats visible.
+    // Stop ends the segment but keeps last stats visible.
     if (state.segmentStart){
       state.elapsedBefore = elapsedMs();
       state.segmentStart = null;
