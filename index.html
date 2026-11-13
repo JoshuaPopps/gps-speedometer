@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<link rel="icon" href="data:," />
+<title>GPS Speedometer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F1EA;
+    --bg-card:#FFFFFF;
+    --bg-soft:#ECE8DD;
+    --ink:#131311;
+    --ink-2:#5A5750;
+    --ink-3:#8A867E;
+    --line:#DDD8CC;
+    --accent:#E8490F;
+    --accent-ink:#FFF;
+    --green:#1B7A3D;
+    --green-bg:#E2F0E6;
+    --amber:#9A6B00;
+    --amber-bg:#FFF3C4;
+    --red:#B91C1C;
+    --red-bg:#FDE8E8;
+    --speed-size: clamp(132px, 42vw, 260px);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0C0C0B;
+      --bg-card:#171716;
+      --bg-soft:#1E1E1C;
+      --ink:#F5F1E8;
+      --ink-2:#A8A49A;
+      --ink-3:#6E6A61;
+      --line:#2A2A27;
+      --accent:#FF5A1F;
+      --green:#4ADE80;
+      --green-bg:#12291A;
+      --amber:#FACC15;
+      --amber-bg:#2A2306;
+      --red:#FCA5A5;
+      --red-bg:#2E1212;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Barlow", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  button, [role="button"]{ min-height:44px; }
+  .app{
+    max-width:680px;
+    margin:0 auto;
+    padding:14px 16px 20px;
+    display:flex;
+    flex-direction:column;
+    min-height:100dvh;
+  }
+
+  /* Top status bar */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .gps-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:8px 12px 8px 10px;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.02em;
+    line-height:1;
+    min-height:36px;
+  }
+  .dot{ width:10px; height:10px; border-radius:50%; background:var(--ink-3); flex:none; }
+  .dot.searching{ background:var(--amber); animation:pulse 1s ease-in-out infinite; }
+  .dot.live{ background:var(--green); box-shadow:0 0 0 4px var(--green-bg); }
+  .dot.error{ background:var(--red); }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+  @media (prefers-reduced-motion: reduce){ .dot.searching{animation:none} }
+  .top-right{
+    display:flex; align-items:center; gap:8px;
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+    font-size:12.5px; color:var(--ink-2); text-align:right; line-height:1.2;
+  }
+  .top-right strong{ color:var(--ink); font-weight:600; }
+
+  /* Units */
+  .units{
+    display:flex;
+    background:var(--bg-soft);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:3px;
+    gap:2px;
+  }
+  .units button{
+    border:0; background:transparent; color:var(--ink-2);
+    font:600 13px/1 "Barlow",sans-serif; letter-spacing:.06em;
+    padding:0 14px; border-radius:999px; cursor:pointer; min-height:36px;
+  }
+  .units button[aria-pressed="true"]{ background:var(--ink); color:var(--bg); }
+
+  /* Speed hero */
+  .hero{
+    text-align:center;
+    padding:10px 0 2px;
+  }
+  .hero-label{
+    font-size:12px; font-weight:700; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-2);
+    display:flex; align-items:center; justify-content:center; gap:10px;
+  }
+  .hero-label::before,.hero-label::after{ content:""; height:1px; width:28px; background:var(--line); }
+  .speed-wrap{
+    display:flex; align-items:baseline; justify-content:center; gap:8px;
+    line-height:.9; margin-top:2px;
+  }
+  .speed{
+    font-family:"Barlow Condensed", "Barlow", sans-serif;
+    font-weight:700;
+    font-size:var(--speed-size);
+    letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums;
+    line-height:.92;
+  }
+  .speed-unit{
+    font-family:"Barlow Condensed", sans-serif;
+    font-weight:600; font-size:clamp(22px,6vw,34px); letter-spacing:.08em; color:var(--ink-2); text-transform:uppercase;
+  }
+  .speed-sub{
+    margin-top:6px;
+    display:flex; justify-content:center; gap:8px; flex-wrap:wrap;
+    font-size:14px; color:var(--ink-2);
+  }
+  .speed-sub b{ color:var(--ink); font-weight:600; }
+  .heading-chip{
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--bg-card); border:1px solid var(--line); border-radius:999px; padding:6px 10px;
+    font-size:13px; font-weight:600;
+  }
+  .compass{
+    width:18px; height:18px; border-radius:50%; border:1.5px solid var(--ink-2);
+    display:grid; place-items:center; font-size:9px; line-height:1; position:relative; flex:none;
+  }
+  .needle{ position:absolute; inset:0; display:grid; place-items:center; transition:transform .3s linear; }
+  .needle::before{ content:"▲"; font-size:8px; color:var(--accent); transform:translateY(-4px); }
+
+  /* Message / error */
+  .notice{
+    margin:12px 0 0;
+    border-radius:12px; padding:12px 14px; font-size:14px; line-height:1.45;
+    display:none;
+  }
+  .notice.show{ display:block; }
+  .notice.warn{ background:var(--amber-bg); color:var(--ink); border:1px solid color-mix(in srgb, var(--amber) 35%, transparent); }
+  .notice.error{ background:var(--red-bg); color:var(--ink); border:1px solid color-mix(in srgb, var(--red) 30%, transparent); }
+  .notice.info{ background:var(--bg-card); border:1px solid var(--line); color:var(--ink-2); }
+  .notice strong{ color:var(--ink); }
+
+  /* Stats */
+  .stats{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;
+  }
+  @media (min-width:520px){ .stats{ grid-template-columns:repeat(4,1fr); } }
+  .stat{
+    background:var(--bg-card); border:1px solid var(--line); border-radius:16px;
+    padding:14px 14px 12px;
+  }
+  .stat-label{ font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-2); }
+  .stat-value{ margin-top:6px; font-family:"IBM Plex Mono", ui-monospace, monospace; font-weight:600; font-size:26px; line-height:1; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .stat-value small{ font-size:13px; font-weight:500; color:var(--ink-2); letter-spacing:0; margin-left:2px; }
+  .stat-sub{ margin-top:5px; font-size:12.5px; color:var(--ink-2); line-height:1.3; }
+
+  .secondary{
+    display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:10px;
+  }
+  .secondary .stat{ padding:11px 12px 10px; border-radius:12px; }
+  .secondary .stat-value{ font-size:18px; }
+
+  /* Controls */
+  .controls{ margin-top:auto; padding-top:18px; }
+  .main-btn{
+    width:100%; border:0; border-radius:16px; cursor:pointer;
+    background:var(--accent); color:var(--accent-ink);
+    font:700 19px/1 "Barlow",sans-serif; letter-spacing:.04em; text-transform:uppercase;
+    padding:18px 16px; min-height:60px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    box-shadow:0 8px 20px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  .main-btn:active{ transform:scale(.99); }
+  .main-btn.is-stop{ background:var(--ink); color:var(--bg); box-shadow:none; }
+  .main-btn:disabled{ opacity:.55; cursor:not-allowed; }
+  .row-btns{ display:flex; gap:10px; margin-top:10px; }
+  .ghost-btn{
+    flex:1; background:var(--bg-card); color:var(--ink); border:1px solid var(--line);
+    border-radius:12px; padding:12px 10px; font:600 14px/1.2 "Barlow",sans-serif; cursor:pointer; min-height:48px;
+    display:flex; align-items:center; justify-content:center; gap:7px; text-align:center;
+  }
+  .ghost-btn[aria-pressed="true"]{ border-color:var(--ink); background:var(--bg-soft); }
+  .ghost-btn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  /* Add to Home Screen */
+  .install-btn{
+    width:100%; margin-top:10px; flex:none;
+    border:1.5px dashed var(--ink-3); background:var(--bg-soft);
+    font-weight:700; letter-spacing:.01em;
+  }
+  .install-btn:hover{ border-color:var(--ink); }
+  .install-btn .install-icon{
+    width:22px; height:22px; flex:none; border:1.5px solid currentColor; border-radius:6px;
+    display:grid; place-items:center; font-size:15px; line-height:1; font-weight:700;
+  }
+  .install-panel{
+    margin-top:10px; background:var(--bg-card); border:1px solid var(--line);
+    border-radius:16px; padding:16px 16px 14px; text-align:left;
+  }
+  .install-panel[hidden]{ display:none; }
+  .install-panel-head{
+    display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+  }
+  .install-panel-title{
+    font-family:"Barlow Condensed", sans-serif; font-weight:700; font-size:20px;
+    letter-spacing:.04em; text-transform:uppercase; line-height:1.1;
+  }
+  .install-panel-sub{ margin-top:3px; font-size:13.5px; line-height:1.45; color:var(--ink-2); }
+  .install-close{
+    flex:none; width:36px; height:36px; min-height:36px; border-radius:50%;
+    border:1px solid var(--line); background:var(--bg-soft); color:var(--ink);
+    font-size:20px; line-height:1; cursor:pointer; display:grid; place-items:center; padding:0;
+  }
+  /* Guided walkthrough — one step at a time */
+  .install-progress{
+    margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  .install-step-label{
+    font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:12px; font-weight:600;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--ink-2);
+  }
+  .install-dots{ display:inline-flex; gap:6px; }
+  .install-dot{ width:8px; height:8px; border-radius:50%; background:var(--line); }
+  .install-dot.is-active{ background:var(--accent); }
+  .install-dot.is-done{ background:var(--ink); }
+  .install-step-card{
+    margin-top:10px; background:var(--bg-soft); border:1px solid var(--line); border-radius:12px;
+    padding:18px 16px; display:flex; gap:14px; align-items:flex-start; min-height:96px;
+  }
+  .install-step-num{
+    flex:none; width:38px; height:38px; border-radius:50%;
+    background:var(--ink); color:var(--bg); font:700 18px/38px "IBM Plex Mono", monospace;
+    text-align:center;
+  }
+  .install-step-text{
+    margin:2px 0 0; font-size:17px; line-height:1.5; font-weight:500; color:var(--ink-2);
+  }
+  .install-step-text strong{ color:var(--ink); }
+  .install-step-text .share-glyph{
+    display:inline-grid; place-items:center; width:22px; height:22px; vertical-align:-5px;
+    border:1.5px solid var(--ink); border-radius:5px; font-size:12px; line-height:1; color:var(--ink);
+    margin:0 2px; font-weight:700;
+  }
+  .install-actions{ display:flex; gap:10px; margin-top:12px; }
+  .install-back-btn{ flex:0 0 96px; }
+  .install-next-btn{
+    flex:1; border:0; border-radius:12px; cursor:pointer; min-height:48px;
+    background:var(--ink); color:var(--bg);
+    font:700 15px/1.2 "Barlow",sans-serif; letter-spacing:.03em;
+    display:flex; align-items:center; justify-content:center; padding:12px 10px;
+  }
+  .install-next-btn:active{ transform:scale(.99); }
+  .install-note{ margin:12px 0 0; font-size:13px; line-height:1.5; color:var(--ink-2); border-top:1px solid var(--line); padding-top:10px; }
+  .install-done{
+    margin-top:10px; background:var(--green-bg); border:1px solid color-mix(in srgb, var(--green) 30%, transparent);
+    color:var(--ink); border-radius:12px; padding:11px 13px; font-size:14px; line-height:1.45; display:none;
+  }
+  .install-done.show{ display:block; }
+
+  .hint{
+    margin-top:14px; text-align:center; font-size:13px; line-height:1.5; color:var(--ink-2);
+  }
+  .hint a{ color:var(--ink); font-weight:600; }
+
+  /* Simple view — entry button */
+  .simple-btn{
+    width:100%; margin-top:10px; flex:none;
+    font-weight:700; letter-spacing:.02em;
+  }
+  .simple-btn .simple-btn-icon{
+    font-size:17px; line-height:1; font-weight:700;
+  }
+
+  /* Simple view — full-bleed, speed only */
+  .simple-view{
+    position:fixed; inset:0; z-index:60;
+    background:var(--bg); color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px 16px calc(20px + env(safe-area-inset-bottom));
+    cursor:pointer; -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation; user-select:none; -webkit-user-select:none;
+  }
+  .simple-view[hidden]{ display:none; }
+  .simple-speed-wrap{
+    display:flex; align-items:baseline; justify-content:center; gap:10px;
+    line-height:.9; text-align:center; max-width:100%;
+  }
+  .simple-speed{
+    font-family:"Barlow Condensed", "Barlow", sans-serif;
+    font-weight:700;
+    font-size:clamp(150px, min(62vw, 56vh), 400px);
+    letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums;
+    line-height:.92;
+  }
+  .simple-view.is-long .simple-speed{
+    font-size:clamp(120px, min(46vw, 50vh), 320px);
+  }
+  .simple-unit{
+    font-family:"Barlow Condensed", sans-serif;
+    font-weight:600;
+    font-size:clamp(26px, 7.5vw, 44px);
+    letter-spacing:.08em; color:var(--ink-2); text-transform:uppercase;
+  }
+  .simple-exit{
+    position:absolute; left:0; right:0;
+    bottom:calc(18px + env(safe-area-inset-bottom));
+    text-align:center;
+    font-size:12px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-3);
+    pointer-events:none;
+  }
+  @media (orientation: landscape){
+    .simple-speed{ font-size:clamp(130px, min(42vw, 68vh), 380px); }
+    .simple-view.is-long .simple-speed{ font-size:clamp(110px, min(34vw, 62vh), 300px); }
+    .simple-unit{ font-size:clamp(22px, 5vw, 36px); }
+    .simple-exit{ bottom:calc(10px + env(safe-area-inset-bottom)); }
+  }
+
+  /* Landscape on phones: tighten hero so controls stay visible */
+  @media (orientation: landscape) and (max-height: 500px){
+    :root{ --speed-size: clamp(96px, 28vh, 150px); }
+    .app{ padding-top:8px; }
+    .hero{ padding-top:2px; }
+    .stats{ margin-top:10px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="gps-pill" id="gpsPill" role="status" aria-live="polite">
+      <span class="dot" id="gpsDot"></span>
+      <span id="gpsText">GPS off — tap Start for a fix</span>
+    </div>
+    <div class="units" role="group" aria-label="Speed units">
+      <button type="button" id="unitMph" aria-pressed="true">MPH</button>
+      <button type="button" id="unitKmh" aria-pressed="false">KM/H</button>
+    </div>
+  </div>
+
+  <div class="topbar" style="margin-top:10px;">
+    <div class="top-right" style="text-align:left;">
+      <span>Accuracy<br><strong id="accuracyText">—</strong></span>
+    </div>
+    <div class="top-right">
+      <span id="clockText">--:--</span><br>
+      <span style="font-family:var(--font-sans, inherit); font-size:12px;">local time</span>
+    </div>
+  </div>
+
+  <section class="hero" aria-label="Current speed">
+    <div class="hero-label">Current speed</div>
+    <div class="speed-wrap">
+      <div class="speed" id="speedValue">0</div>
+      <div class="speed-unit" id="speedUnit">mph</div>
+    </div>
+    <div class="speed-sub">
+      <span class="heading-chip"><span class="compass"><span class="needle" id="needle"></span></span> <span id="headingText">— heading</span></span>
+      <span id="movingText">Not moving</span>
+    </div>
+  </section>
+
+  <div class="notice warn" id="noticeWarn" role="alert"></div>
+  <div class="notice error" id="noticeError" role="alert"></div>
+  <div class="notice info show" id="noticeInfo">
+    <strong>How it works, like Roam:</strong> tap <strong>Start Ride</strong>, allow location, and mount the phone where you can glance at it. Speed comes straight from GPS — no wheel sensor, no account. Keep it plugged in on longer rides; GPS is thirsty.
+  </div>
+
+  <div class="stats" aria-label="Trip stats">
+    <div class="stat">
+      <div class="stat-label">Trip</div>
+      <div class="stat-value"><span id="tripValue">0.00</span><small id="tripUnit">mi</small></div>
+      <div class="stat-sub" id="tripSub">Distance this ride</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Max speed</div>
+      <div class="stat-value"><span id="maxValue">0</span><small class="unitLabel">mph</small></div>
+      <div class="stat-sub">Fastest so far</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Average</div>
+      <div class="stat-value"><span id="avgValue">0</span><small class="unitLabel">mph</small></div>
+      <div class="stat-sub">Moving average</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Ride time</div>
+      <div class="stat-value" style="font-size:22px; padding-top:3px;" id="timeValue">0:00</div>
+      <div class="stat-sub" id="timeSub">Tap Start to begin</div>
+    </div>
+  </div>
+
+  <div class="secondary" aria-label="More data">
+    <div class="stat">
+      <div class="stat-label">Altitude</div>
+      <div class="stat-value"><span id="altValue">—</span><small id="altUnit"></small></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Heading</div>
+      <div class="stat-value"><span id="headingValue">—</span></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">GPS fixes</div>
+      <div class="stat-value"><span id="fixValue">0</span></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button type="button" class="main-btn" id="mainBtn">● &nbsp;Start Ride</button>
+    <button type="button" class="ghost-btn simple-btn" id="simpleBtn" aria-haspopup="true">
+      <span class="simple-btn-icon" aria-hidden="true">⛶</span> Simple view — speed only
+    </button>
+    <button type="button" class="ghost-btn install-btn" id="installBtn" aria-expanded="false" aria-controls="installPanel">
+      <span class="install-icon" aria-hidden="true">+</span> Add to Home Screen
+    </button>
+    <div class="install-done" id="installDone" role="status">Added — look for <strong>GPS Speedometer</strong> on your home screen. Open it from there next ride.</div>
+    <div class="install-panel" id="installPanel" hidden>
+      <div class="install-panel-head">
+        <div>
+          <div class="install-panel-title">Add to Home Screen</div>
+          <p class="install-panel-sub" id="installPanelSub">Three quick steps, one at a time.</p>
+        </div>
+        <button type="button" class="install-close" id="installClose" aria-label="Close walkthrough">×</button>
+      </div>
+      <div class="install-progress">
+        <span class="install-step-label" id="installStepLabel">Step 1 of 3</span>
+        <span class="install-dots" aria-hidden="true">
+          <span class="install-dot is-active" data-dot="0"></span>
+          <span class="install-dot" data-dot="1"></span>
+          <span class="install-dot" data-dot="2"></span>
+        </span>
+      </div>
+      <div class="install-step-card" aria-live="polite">
+        <div class="install-step-num" id="installStepNum">1</div>
+        <p class="install-step-text" id="installStepText">Tap the <strong>Share</strong> button at the bottom of Safari.</p>
+      </div>
+      <p class="install-note" id="installNote" hidden>On iPhone this only works in Safari — if you're viewing this inside another app, open it in Safari first.</p>
+      <div class="install-actions">
+        <button type="button" class="ghost-btn install-back-btn" id="installBack" disabled>Back</button>
+        <button type="button" class="install-next-btn" id="installNext">Next</button>
+      </div>
+    </div>
+    <div class="row-btns">
+      <button type="button" class="ghost-btn" id="wakeBtn" aria-pressed="false">☀ Keep screen awake</button>
+      <button type="button" class="ghost-btn" id="resetBtn" disabled>↺ Reset trip</button>
+    </div>
+    <p class="hint">Speed is GPS speed, so it lags a second or two behind the bike and drops to 0 in tunnels. If it reads 0 while you're moving, check that location is set to <b>Precise / High accuracy</b> and this page has permission. Don't interact with the phone while riding — glance only.</p>
+  </div>
+
+</div>
+
+<div class="simple-view" id="simpleView" hidden role="button" tabindex="0" aria-label="Simple view. Tap to return to full view.">
+  <div class="simple-speed-wrap">
+    <span class="simple-speed" id="simpleSpeed">0</span>
+    <span class="simple-unit" id="simpleUnit">mph</span>
+  </div>
+  <div class="simple-exit" aria-hidden="true">Tap to exit</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var els = {
+    dot: document.getElementById('gpsDot'),
+    gpsText: document.getElementById('gpsText'),
+    accuracy: document.getElementById('accuracyText'),
+    clock: document.getElementById('clockText'),
+    speed: document.getElementById('speedValue'),
+    speedUnit: document.getElementById('speedUnit'),
+    headingText: document.getElementById('headingText'),
+    headingValue: document.getElementById('headingValue'),
+    needle: document.getElementById('needle'),
+    moving: document.getElementById('movingText'),
+    trip: document.getElementById('tripValue'),
+    tripUnit: document.getElementById('tripUnit'),
+    max: document.getElementById('maxValue'),
+    avg: document.getElementById('avgValue'),
+    time: document.getElementById('timeValue'),
+    timeSub: document.getElementById('timeSub'),
+    alt: document.getElementById('altValue'),
+    altUnit: document.getElementById('altUnit'),
+    fixes: document.getElementById('fixValue'),
+    mainBtn: document.getElementById('mainBtn'),
+    wakeBtn: document.getElementById('wakeBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    unitMph: document.getElementById('unitMph'),
+    unitKmh: document.getElementById('unitKmh'),
+    warn: document.getElementById('noticeWarn'),
+    err: document.getElementById('noticeError'),
+    info: document.getElementById('noticeInfo'),
+    installBtn: document.getElementById('installBtn'),
+    installPanel: document.getElementById('installPanel'),
+    installClose: document.getElementById('installClose'),
+    installDone: document.getElementById('installDone'),
+    installPanelSub: document.getElementById('installPanelSub'),
+    installNote: document.getElementById('installNote'),
+    installStepLabel: document.getElementById('installStepLabel'),
+    installStepNum: document.getElementById('installStepNum'),
+    installStepText: document.getElementById('installStepText'),
+    installBack: document.getElementById('installBack'),
+    installNext: document.getElementById('installNext'),
+    installDots: document.querySelectorAll('.install-dot'),
+    simpleBtn: document.getElementById('simpleBtn'),
+    simpleView: document.getElementById('simpleView'),
+    simpleSpeed: document.getElementById('simpleSpeed'),
+    simpleUnit: document.getElementById('simpleUnit')
+  };
+
+  var state = {
+    unit: 'mph', // or 'kmh'
+    tracking: false,
+    paused: false,
+    watchId: null,
+    lastPos: null, // {lat, lon, t}
+    totalMeters: 0,
+    maxMs: 0,
+    currentMs: 0,
+    speedBuffer: [], // last speeds for smoothing
+    fixes: 0,
+    startStamp: null,
+    elapsedBefore: 0, // ms accumulated before current run segment
+    segmentStart: null,
+    timerId: null,
+    headingDeg: null,
+    altitudeM: null,
+    accuracyM: null,
+    wakeLock: null,
+    wakeWanted: false,
+    simpleMode: false
+  };
+
+  function toSpeed(ms){
+    if (ms == null || isNaN(ms)) return 0;
+    return state.unit === 'mph' ? ms * 2.236936 : ms * 3.6;
+  }
+  function toDist(meters){
+    return state.unit === 'mph' ? meters / 1609.344 : meters / 1000;
+  }
+  function distUnit(){ return state.unit === 'mph' ? 'mi' : 'km'; }
+  function altConvert(m){
+    if (m == null) return null;
+    return state.unit === 'mph' ? Math.round(m * 3.28084) : Math.round(m);
+  }
+  function altUnitLabel(){ return state.unit === 'mph' ? ' ft' : ' m'; }
+
+  function cardinal(deg){
+    if (deg == null || isNaN(deg)) return '—';
+    var dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(((deg % 360) / 45)) % 8];
+  }
+
+  function haversine(lat1, lon1, lat2, lon2){
+    var R = 6371000;
+    var dLat = (lat2-lat1) * Math.PI/180;
+    var dLon = (lon2-lon1) * Math.PI/180;
+    var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function formatTime(ms){
+    var s = Math.floor(ms/1000);
+    var h = Math.floor(s/3600);
+    var m = Math.floor((s%3600)/60);
+    var sec = s%60;
+    if (h>0) return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    return m + ':' + String(sec).padStart(2,'0');
+  }
+  function elapsedMs(){
+    if (!state.segmentStart) return state.elapsedBefore;
+    if (state.paused) return state.elapsedBefore;
+    return state.elapsedBefore + (Date.now() - state.segmentStart);
+  }
+
+  function showNotice(kind, html){
+    els.warn.className = 'notice warn'; els.err.className='notice error';
+    els.warn.innerHTML=''; els.err.innerHTML='';
+    if (!html) return;
+    if (kind==='warn'){ els.warn.innerHTML = html; els.warn.classList.add('show'); }
+    if (kind==='error'){ els.err.innerHTML = html; els.err.classList.add('show'); }
+  }
+
+  function render(){
+    // speed — smoothed
+    var dispMs = state.currentMs;
+    var spd = toSpeed(dispMs);
+    // Show integer, like Roam
+    var speedText = String(Math.round(spd));
+    els.speed.textContent = speedText;
+    els.speedUnit.textContent = state.unit;
+    // Simple view mirrors the exact same digits + unit from the same render
+    if (els.simpleSpeed) els.simpleSpeed.textContent = speedText;
+    if (els.simpleUnit) els.simpleUnit.textContent = state.unit;
+    if (els.simpleView) els.simpleView.classList.toggle('is-long', speedText.length >= 3);
+    document.querySelectorAll('.unitLabel').forEach(function(n){ n.textContent = state.unit; });
+
+    // trip
+    var d = toDist(state.totalMeters);
+    els.trip.textContent = d < 10 ? d.toFixed(2) : d < 100 ? d.toFixed(1) : Math.round(d).toString();
+    els.tripUnit.textContent = distUnit();
+
+    // max / avg
+    els.max.textContent = String(Math.round(toSpeed(state.maxMs)));
+    var elapsed = elapsedMs();
+    var avgMs = elapsed > 3000 && state.totalMeters > 5 ? state.totalMeters / (elapsed/1000) : 0;
+    // Prefer moving average if we have it? Use distance/time as honest average
+    els.avg.textContent = String(Math.round(toSpeed(avgMs)));
+
+    els.time.textContent = formatTime(elapsed);
+    els.timeSub.textContent = state.tracking ? (state.paused ? 'Paused' : 'Rolling') : (elapsed>0 ? 'Stopped — tap Start to resume' : 'Tap Start to begin');
+
+    // heading
+    if (state.headingDeg != null){
+      var c = cardinal(state.headingDeg);
+      els.headingText.textContent = c + ' · ' + Math.round(state.headingDeg) + '°';
+      els.headingValue.textContent = c + ' ' + Math.round(state.headingDeg) + '°';
+      els.needle.style.transform = 'rotate(' + state.headingDeg + 'deg)';
+    } else {
+      els.headingText.textContent = '— heading';
+      els.headingValue.textContent = '—';
+    }
+    els.moving.innerHTML = dispMs < 0.7 ? 'Not moving' : (dispMs < 4 ? '<b>Rolling</b> — low speed' : '<b>Moving</b>');
+
+    // altitude
+    if (state.altitudeM != null){
+      els.alt.textContent = altConvert(state.altitudeM).toLocaleString();
+      els.altUnit.textContent = altUnitLabel();
+    } else {
+      els.alt.textContent = '—'; els.altUnit.textContent='';
+    }
+    els.fixes.textContent = String(state.fixes);
+    if (state.accuracyM != null){
+      els.accuracy.textContent = state.unit==='mph' ? Math.round(state.accuracyM*3.28084) + ' ft' : Math.round(state.accuracyM) + ' m';
+    } else {
+      els.accuracy.textContent = '—';
+    }
+
+    els.resetBtn.disabled = !(state.totalMeters>0 || elapsed>0 || state.maxMs>0);
+  }
+
+  function setGpsStatus(mode, text){
+    els.dot.className = 'dot' + (mode ? ' ' + mode : '');
+    els.gpsText.textContent = text;
+  }
+
+  function updateClock(){
+    var now = new Date();
+    var h = now.getHours(); var m = String(now.getMinutes()).padStart(2,'0');
+    var ampm = h>=12 ? 'PM':'AM'; h = h%12 || 12;
+    els.clock.textContent = h + ':' + m + ' ' + ampm;
+  }
+  updateClock(); setInterval(updateClock, 15000);
+
+  // Timer for elapsed + render
+  function startTimer(){
+    if (state.timerId) return;
+    state.timerId = setInterval(function(){ if(state.tracking && !state.paused) render(); }, 500);
+  }
+  function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
+
+  function onPosition(pos){
+    state.fixes++;
+    var c = pos.coords;
+    state.accuracyM = c.accuracy != null ? c.accuracy : null;
+    state.altitudeM = c.altitude != null ? c.altitude : state.altitudeM;
+    if (c.heading != null && !isNaN(c.heading) && (c.speed==null || c.speed>0.5)) state.headingDeg = c.heading;
+
+    var now = pos.timestamp || Date.now();
+    var speedMs = null;
+
+    if (c.speed != null && !isNaN(c.speed) && c.speed >= 0){
+      speedMs = c.speed;
+    } else if (state.lastPos){
+      var dt = (now - state.lastPos.t)/1000;
+      if (dt > 0.5 && dt < 10){
+        var dd = haversine(state.lastPos.lat, state.lastPos.lon, c.latitude, c.longitude);
+        // Only trust derived speed if accuracy is decent and movement isn't jitter
+        if (dd > 1) speedMs = dd/dt;
+        else speedMs = 0;
+      }
+    }
+    if (speedMs == null) speedMs = 0;
+    // Kill GPS jitter when stationary
+    if (speedMs < 0.45) speedMs = 0;
+
+    // Smoothing: average last 3
+    state.speedBuffer.push(speedMs);
+    if (state.speedBuffer.length > 3) state.speedBuffer.shift();
+    var smooth = state.speedBuffer.reduce(function(a,b){return a+b;},0)/state.speedBuffer.length;
+    if (speedMs===0) smooth = 0;
+    state.currentMs = smooth;
+
+    if (speedMs > state.maxMs) state.maxMs = speedMs;
+
+    // Distance
+    if (state.lastPos && state.tracking && !state.paused){
+      var dist = haversine(state.lastPos.lat, state.lastPos.lon, c.latitude, c.longitude);
+      var dt2 = (now - state.lastPos.t)/1000;
+      // Filter: ignore tiny jitter and impossible jumps
+      // If accuracy is very poor, be stricter
+      var acc = c.accuracy || 20;
+      if (dist > 2 && dist < 500 && dt2>0 && dt2<15){
+        // implied speed check — ignore teleports
+        var implied = dist/dt2;
+        if (implied < 90){ // < ~200 mph, sanity
+          // If stationary jitter, dist will be small relative to accuracy — require dist > acc*0.35 when slow
+          if (!(smooth < 0.7 && dist < acc*0.6)){
+            state.totalMeters += dist;
+          }
+        }
+      }
+    }
+    state.lastPos = { lat:c.latitude, lon:c.longitude, t: now };
+
+    if (state.accuracyM != null && state.accuracyM > 65){
+      showNotice('warn', '<strong>Weak GPS.</strong> Accuracy is about ' + Math.round(state.accuracyM*3.28084) + ' ft right now — speed may jump around. Open sky helps; keep the phone out of a pocket or bag.');
+    } else {
+      // clear warn if it was the weak GPS one (leave other warnings alone by just clearing)
+      if (els.warn.classList.contains('show') && els.warn.textContent.indexOf('Weak GPS')!==-1) showNotice('', '');
+    }
+    setGpsStatus('live', 'GPS live · ±' + (state.accuracyM ? Math.round(state.accuracyM*3.28084) + ' ft' : '—'));
+    els.info.classList.remove('show');
+    render();
+  }
+
+  function onError(err){
+    var msg = '';
+    if (err.code === 1){
+      msg = '<strong>Location is blocked.</strong> Allow location for this page in your browser / phone settings, set it to <strong>Precise</strong>, then tap Start Ride again.';
+      setGpsStatus('error','Location blocked');
+    } else if (err.code === 2){
+      msg = '<strong>GPS unavailable.</strong> The phone couldn\'t get a fix. Move to open sky and try again.';
+      setGpsStatus('error','GPS unavailable');
+    } else if (err.code === 3){
+      msg = '<strong>GPS timed out</strong> finding a fix. Tap Start Ride again — the second try is usually faster.';
+      setGpsStatus('searching','GPS timed out — retry');
+    } else {
+      msg = '<strong>Location error.</strong> ' + (err.message || 'Try again.');
+      setGpsStatus('error','Location error');
+    }
+    showNotice('error', msg);
+    render();
+  }
+
+  function startTracking(){
+    if (!('geolocation' in navigator)){
+      showNotice('error','<strong>No GPS on this device / browser.</strong> Open this page on your phone with location services on.');
+      return;
+    }
+    showNotice('','');
+    setGpsStatus('searching','Finding GPS…');
+    els.info.classList.remove('show');
+
+    if (state.watchId == null){
+      state.watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20000
+      });
+    }
+    if (!state.tracking){
+      state.tracking = true;
+      state.paused = false;
+      state.segmentStart = Date.now();
+      if (!state.startStamp) state.startStamp = Date.now();
+    } else if (state.paused){
+      state.paused = false;
+      state.segmentStart = Date.now();
+    }
+    startTimer();
+    els.mainBtn.textContent = '■  Stop';
+    els.mainBtn.classList.add('is-stop');
+    if (state.wakeWanted) requestWake();
+    render();
+  }
+
+  function stopTracking(){
+    // Pause the clock, keep the watch so speed stays live when stopped at a light?
+    // Roam-like behavior: Stop ends the segment but keeps last stats visible.
+    if (state.segmentStart){
+      state.elapsedBefore = elapsedMs();
+      state.segmentStart = null;
+    }
+    state.paused = true;
+    // Keep watch running for instant resume, but mark not tracking for distance? Actually keep tracking flag for UI.
+    // We'll set tracking false for button state, paused true for stats.
+    state.tracking = false;
+    els.mainBtn.innerHTML = '● &nbsp;Resume Ride';
+    els.mainBtn.classList.remove('is-stop');
+    setGpsStatus(state.fixes>0 ? 'live' : '', state.fixes>0 ? 'Paused — GPS still on' : 'GPS off — tap Start for a fix');
+    stopTimer();
+    render();
+  }
+
+  els.mainBtn.addEventListener('click', function(){
+    if (state.tracking) stopTracking();
+    else startTracking();
+  });
+
+  els.resetBtn.addEventListener('click', function(){
+    state.totalMeters = 0;
+    state.maxMs = 0;
+    state.currentMs = 0;
+    state.speedBuffer = [];
+    state.elapsedBefore = 0;
+    state.segmentStart = state.tracking ? Date.now() : null;
+    state.startStamp = state.tracking ? Date.now() : null;
+    state.fixes = 0;
+    // Keep lastPos so next distance calc doesn't jump
+    showNotice('','');
+    if (!state.tracking) setGpsStatus('', 'GPS off — tap Start for a fix');
+    render();
+  });
+
+  function setUnit(u){
+    state.unit = u;
+    els.unitMph.setAttribute('aria-pressed', u==='mph' ? 'true':'false');
+    els.unitKmh.setAttribute('aria-pressed', u==='kmh' ? 'true':'false');
+    render();
+  }
+  els.unitMph.addEventListener('click', function(){ setUnit('mph'); });
+  els.unitKmh.addEventListener('click', function(){ setUnit('kmh'); });
+
+  // Wake lock
+  function requestWake(){
+    if (!('wakeLock' in navigator)) {
+      els.wakeBtn.textContent = 'Keep awake not supported';
+      els.wakeBtn.disabled = true;
+      return;
+    }
+    navigator.wakeLock.request('screen').then(function(lock){
+      state.wakeLock = lock;
+      els.wakeBtn.setAttribute('aria-pressed','true');
+      els.wakeBtn.textContent = '☀ Screen awake: ON';
+      lock.addEventListener('release', function(){
+        state.wakeLock = null;
+        if (!state.wakeWanted) {
+          els.wakeBtn.setAttribute('aria-pressed','false');
+          els.wakeBtn.textContent = '☀ Keep screen awake';
+        }
+      });
+    }).catch(function(){
+      state.wakeWanted = false;
+      els.wakeBtn.setAttribute('aria-pressed','false');
+    });
+  }
+  function releaseWake(){
+    if (state.wakeLock){ try{ state.wakeLock.release(); }catch(e){} state.wakeLock=null; }
+    els.wakeBtn.setAttribute('aria-pressed','false');
+    els.wakeBtn.textContent = '☀ Keep screen awake';
+  }
+  els.wakeBtn.addEventListener('click', function(){
+    state.wakeWanted = !state.wakeWanted;
+    if (state.wakeWanted) requestWake(); else releaseWake();
+  });
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState==='visible' && state.wakeWanted) requestWake();
+  });
+  if (!('wakeLock' in navigator)){
+    // Don't disable upfront on browsers that add it later; label it so user knows on tap
+  }
+
+  // --- Add to Home Screen ---
+  var deferredInstallPrompt = null;
+
+  function isStandalone(){
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }
+  function isIOS(){
+    var ua = window.navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+  }
+  function isAndroid(){
+    return /Android/i.test(window.navigator.userAgent || '');
+  }
+  // Guided walkthrough — 3 steps, one visible at a time, one short sentence each
+  var INSTALL_STEPS = {
+    ios: [
+      'Tap the <strong>Share</strong> button <span class="share-glyph" aria-hidden="true">\u2191</span> at the bottom of Safari.',
+      'Tap <strong>Add to Home Screen</strong> in the share sheet.',
+      'Tap <strong>Add</strong> in the top corner.'
+    ],
+    android: [
+      'Tap the <strong>Add to Home Screen</strong> button, or open Chrome\u2019s <strong>\u22EE menu</strong> and tap <strong>Add to Home screen</strong>.',
+      'Tap <strong>Install</strong> or <strong>Add</strong> on the prompt.',
+      'Find the <strong>GPS Speedometer</strong> icon on your home screen and open it.'
+    ],
+    generic: [
+      'Open your browser\u2019s <strong>Share</strong> or <strong>\u22EE menu</strong>.',
+      'Tap <strong>Add to Home Screen</strong> or <strong>Install app</strong>.',
+      'Tap <strong>Add</strong>, then open it from your home screen.'
+    ]
+  };
+  var installStepIndex = 0;
+  var installStepSet = INSTALL_STEPS.generic;
+
+  function hideInstallPanel(){
+    if (!els.installPanel) return;
+    els.installPanel.hidden = true;
+    installStepIndex = 0;
+    if (els.installBtn) els.installBtn.setAttribute('aria-expanded', 'false');
+  }
+  function renderInstallStep(){
+    els.installStepLabel.textContent = 'Step ' + (installStepIndex + 1) + ' of 3';
+    els.installStepNum.textContent = String(installStepIndex + 1);
+    els.installStepText.innerHTML = installStepSet[installStepIndex];
+    els.installDots.forEach(function(dot, i){
+      dot.classList.toggle('is-active', i === installStepIndex);
+      dot.classList.toggle('is-done', i < installStepIndex);
+    });
+    els.installBack.disabled = installStepIndex === 0;
+    els.installNext.textContent = installStepIndex === 2 ? 'Done' : 'Next';
+  }
+  function showInstallInstructions(){
+    if (!els.installPanel) return;
+    // Pick the right 3 steps for this device; fall back to generic, never fail silently
+    var ios = isIOS();
+    var android = isAndroid();
+    installStepSet = ios ? INSTALL_STEPS.ios : (android ? INSTALL_STEPS.android : INSTALL_STEPS.generic);
+    installStepIndex = 0;
+    els.installPanelSub.textContent = ios
+      ? 'Three quick steps in Safari, one at a time.'
+      : (android ? 'Three quick steps in Chrome, one at a time.' : 'Three quick steps, one at a time.');
+    els.installNote.hidden = !ios;
+    renderInstallStep();
+    els.installPanel.hidden = false;
+    els.installBtn.setAttribute('aria-expanded', 'true');
+    // Bring the walkthrough into view without jumping the whole page around
+    try { els.installPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e) {}
+  }
+
+  // Capture Chrome/Android's install prompt when the browser offers it
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    if (els.installBtn && !isStandalone()) els.installBtn.hidden = false;
+  });
+
+  window.addEventListener('appinstalled', function(){
+    deferredInstallPrompt = null;
+    hideInstallPanel();
+    if (els.installBtn) els.installBtn.hidden = true;
+    if (els.installDone) els.installDone.classList.add('show');
+  });
+
+  if (els.installBtn){
+    if (isStandalone()){
+      els.installBtn.hidden = true;
+    }
+    els.installBtn.addEventListener('click', function(){
+      // If the panel is already open and there's no native prompt, tapping again closes it
+      if (!deferredInstallPrompt && els.installPanel && !els.installPanel.hidden){
+        hideInstallPanel();
+        return;
+      }
+      if (deferredInstallPrompt){
+        var deferredEvent = deferredInstallPrompt;
+        deferredInstallPrompt = null;
+        try {
+          // Invoke the browser's native install UI held by the beforeinstallprompt event
+          var showNativeInstall = deferredEvent.prompt;
+          showNativeInstall.call(deferredEvent);
+          if (deferredEvent.userChoice && typeof deferredEvent.userChoice.then === 'function'){
+            deferredEvent.userChoice.then(function(choice){
+              if (choice && choice.outcome === 'accepted'){
+                hideInstallPanel();
+                if (els.installDone) els.installDone.classList.add('show');
+              } else {
+                // Declined the native prompt — show the manual way instead of failing silently
+                showInstallInstructions();
+              }
+            }).catch(function(){ showInstallInstructions(); });
+          }
+        } catch(err){
+          showInstallInstructions();
+        }
+        return;
+      }
+      // No native install offer — iPhone/Safari, or the browser didn't offer one — manual walkthrough
+      showInstallInstructions();
+    });
+  }
+  if (els.installClose){
+    els.installClose.addEventListener('click', hideInstallPanel);
+  }
+  if (els.installBack){
+    els.installBack.addEventListener('click', function(){
+      if (installStepIndex > 0){ installStepIndex--; renderInstallStep(); }
+    });
+  }
+  if (els.installNext){
+    els.installNext.addEventListener('click', function(){
+      if (installStepIndex < 2){
+        installStepIndex++;
+        renderInstallStep();
+      } else {
+        // Done on the last step closes the walkthrough
+        hideInstallPanel();
+      }
+    });
+  }
+
+  // --- Simple view (speed only) ---
+  // Pure display toggle: it never touches tracking, trip, or GPS state,
+  // so entering/leaving mid-ride returns to the full view exactly as it was.
+  function enterSimpleView(){
+    if (!els.simpleView || state.simpleMode) return;
+    state.simpleMode = true;
+    render();
+    els.simpleView.hidden = false;
+    document.body.style.overflow = 'hidden';
+    try { els.simpleView.focus({ preventScroll: true }); } catch(e) { try { els.simpleView.focus(); } catch(e2) {} }
+  }
+  function exitSimpleView(){
+    if (!els.simpleView || !state.simpleMode) return;
+    state.simpleMode = false;
+    els.simpleView.hidden = true;
+    document.body.style.overflow = '';
+    render();
+    if (els.simpleBtn) { try { els.simpleBtn.focus({ preventScroll: true }); } catch(e) {} }
+  }
+  if (els.simpleBtn){
+    els.simpleBtn.addEventListener('click', enterSimpleView);
+  }
+  if (els.simpleView){
+    els.simpleView.addEventListener('click', exitSimpleView);
+    els.simpleView.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape'){
+        e.preventDefault();
+        exitSimpleView();
+      }
+    });
+  }
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && state.simpleMode) exitSimpleView();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
