@@ -171,6 +171,27 @@
   .install-done.show{ display:block; }
   .hint{ margin-top:16px; text-align:center; font-size:14px; line-height:1.55; color:var(--muted); }
   .hint b{ color:var(--ink); }
+  .rides{ margin-top:20px; }
+  .rides-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .rides-title{
+    font-family:"UnifrakturCook",serif; font-weight:700; font-size:27px; line-height:1.1; letter-spacing:.01em;
+    background:linear-gradient(180deg,#ffffff 0%,#e3e3ea 30%,#a8a8b2 48%,#f4f4f8 60%,#c6c6cf 78%,#8e8e99 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .rides-head .ghost-btn{ flex:none; min-height:44px; padding:10px 14px; }
+  .rides-empty{ margin:10px 0 0; font-size:15px; line-height:1.5; color:var(--muted); }
+  .ride-list{ list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:12px; }
+  .ride-item{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:13px 14px 12px; }
+  .ride-item.recording{ border-color:var(--accent); box-shadow:var(--glow); }
+  .ride-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .ride-date{ font-family:"Archivo Narrow",sans-serif; font-weight:700; font-size:17px; color:var(--ink); }
+  .ride-badge{ font-family:"Archivo Narrow",sans-serif; font-weight:600; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent-bright); white-space:nowrap; }
+  .ride-stats{ margin-top:8px; display:flex; flex-wrap:wrap; gap:4px 16px; font-size:15px; color:var(--muted); }
+  .ride-stats b{ color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums; }
+  .ride-actions{ margin-top:11px; display:flex; gap:10px; }
+  .ride-actions .ghost-btn{ min-height:44px; }
+  .ride-actions .ghost-btn.danger{ color:var(--signal); }
+  .version-line{ margin-top:18px; text-align:center; font-size:13px; line-height:1.5; color:var(--muted); }
   .panel-scrim{ position:fixed; inset:0; z-index:80; background:rgba(0,0,0,.72); display:flex; align-items:flex-start; justify-content:center; padding:calc(14px + env(safe-area-inset-top)) 14px 14px; }
   .panel-scrim[hidden]{ display:none; }
   .panel{
@@ -359,6 +380,17 @@
     <p class="hint">Speed is GPS speed, so it lags a second or two behind the bike and drops to 0 in tunnels. If it reads 0 while you're moving, check that location is set to <b>Precise / High accuracy</b> and this page has permission. Don't interact with the phone while riding — glance only.</p>
   </div>
 
+  <section class="rides" aria-label="Ride history">
+    <div class="rides-head">
+      <div class="rides-title">Ride history</div>
+      <button type="button" class="ghost-btn" id="importGpxBtn">Import GPX</button>
+      <input type="file" id="importGpxFile" accept=".gpx,application/gpx+xml,text/xml,.xml" hidden>
+    </div>
+    <p class="rides-empty" id="ridesEmpty">No rides saved yet. Tap Start Ride and your rides will land here — route, distance, top speed, and elevation, all on this device.</p>
+    <ul class="ride-list" id="rideList"></ul>
+  </section>
+  <p class="version-line" id="versionLine"></p>
+
 </div>
 
 <!-- Settings panel -->
@@ -490,7 +522,10 @@
     swHeading: $('swHeading'), swMirror: $('swMirror'),
     rngSpeedSize: $('rngSpeedSize'), valSpeedSize: $('valSpeedSize'),
     rowLabelSize: $('rowLabelSize'), rngLabelSize: $('rngLabelSize'), valLabelSize: $('valLabelSize'),
-    panelRideBtn: $('panelRideBtn'), resetMaxBtn: $('resetMaxBtn'), leaveSimpleBtn: $('leaveSimpleBtn')
+    panelRideBtn: $('panelRideBtn'), resetMaxBtn: $('resetMaxBtn'), leaveSimpleBtn: $('leaveSimpleBtn'),
+    rideList: $('rideList'), ridesEmpty: $('ridesEmpty'),
+    importGpxBtn: $('importGpxBtn'), importGpxFile: $('importGpxFile'),
+    versionLine: $('versionLine')
   };
 
   /* ---------- Settings (this session only) ---------- */
@@ -538,7 +573,8 @@
     headingDeg: null, altitudeM: null, accuracyM: null,
     wakeLock: null, wakeWanted: false, simpleWake: false,
     simpleMode: false,
-    permDenied: false, gpsOff: false
+    permDenied: false, gpsOff: false,
+    currentRide: null
   };
 
   function cardinal(deg){
@@ -565,6 +601,273 @@
   }
   function currentSpeedValue(){
     return (state.smoothKmh / 3.6) * U().speed;
+  }
+
+  /* ---------- Rides: record, history, GPX ----------
+     Everything on-device in localStorage — no account, no cloud.
+     A ride is one Start → Stop session. A tap that goes nowhere
+     (under 5 track points and under 50 m) is not saved. If the tab
+     closes mid-ride, the in-progress ride is recovered on next load. */
+  var APP_VERSION = '1.1.0';
+  var RIDES_KEY = 'gpsSpeedo.rides.v1';
+  var CURRENT_KEY = 'gpsSpeedo.current.v1';
+  var MAX_RIDES = 30;
+  var MAX_POINTS = 4000;
+  var REC_MIN_POINTS = 5;   // a ride needs at least this many track points to be saved
+  var REC_MIN_DIST_M = 50;  // ...or this much distance (a pocket-dial start saves nothing)
+  var REC_POINT_MIN_S = 5;  // min seconds between recorded track points
+  var REC_POINT_MIN_M = 10; // min metres between recorded track points
+  var REC_POINT_MAX_S = 30; // ...but never longer than this without a point
+  var lastPersistT = 0;
+  var currentRowEls = null;
+
+  function rideId(){ return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  function loadRides(){
+    try {
+      var raw = localStorage.getItem(RIDES_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e){ return []; }
+  }
+  function saveRides(rides){
+    try { localStorage.setItem(RIDES_KEY, JSON.stringify(rides.slice(0, MAX_RIDES))); return true; }
+    catch (e){ return false; }
+  }
+  function loadCurrent(){
+    try { var raw = localStorage.getItem(CURRENT_KEY); return raw ? JSON.parse(raw) : null; }
+    catch (e){ return null; }
+  }
+  function saveCurrent(ride){
+    try { if (ride) localStorage.setItem(CURRENT_KEY, JSON.stringify(ride)); else localStorage.removeItem(CURRENT_KEY); }
+    catch (e){}
+  }
+  function newRide(){
+    return { id: rideId(), start: Date.now(), end: null, durationMs: 0, distanceM: 0, maxMs: 0, gainM: 0, points: [], imported: false };
+  }
+  function rideStatsFromPoints(points){
+    var dist = 0, gain = 0, maxMs = 0;
+    for (var i = 1; i < points.length; i++){
+      var a = points[i - 1], b = points[i];
+      dist += haversine(a.lat, a.lon, b.lat, b.lon);
+      if (b.ele != null && a.ele != null){
+        var d = b.ele - a.ele;
+        if (d > 2) gain += d; // 2 m noise floor — GPS altitude jitters while parked
+      }
+      if (b.spd != null && b.spd > maxMs) maxMs = b.spd;
+    }
+    return { distanceM: dist, gainM: gain, maxMs: maxMs };
+  }
+  function finalizeRide(ride, endT){
+    ride.end = endT || Date.now();
+    ride.durationMs = Math.max(0, ride.end - ride.start);
+    var st = rideStatsFromPoints(ride.points);
+    ride.distanceM = st.distanceM;
+    ride.gainM = st.gainM;
+    ride.maxMs = Math.max(ride.maxMs || 0, st.maxMs);
+    return ride;
+  }
+  function recordPoint(pos, now){
+    var cur = state.currentRide;
+    if (!cur) return;
+    var p = { lat: pos.coords.latitude, lon: pos.coords.longitude, t: now };
+    if (state.altitudeM != null) p.ele = Math.round(state.altitudeM * 10) / 10;
+    p.spd = Math.round((state.smoothKmh / 3.6) * 100) / 100;
+    var last = cur.points[cur.points.length - 1];
+    if (last){
+      var dt = (now - last.t) / 1000;
+      var dd = haversine(last.lat, last.lon, p.lat, p.lon);
+      if (dt < REC_POINT_MAX_S && (dt < REC_POINT_MIN_S || dd < REC_POINT_MIN_M)) return;
+    }
+    cur.points.push(p);
+    if (cur.points.length > MAX_POINTS){
+      cur.points = cur.points.filter(function(_, i){ return i % 2 === 0; });
+    }
+    var nowMs = Date.now();
+    if (nowMs - lastPersistT > 10000){ lastPersistT = nowMs; saveCurrent(cur); }
+  }
+  function finishCurrentRide(){
+    var cur = state.currentRide;
+    state.currentRide = null;
+    saveCurrent(null);
+    if (cur && cur.points){
+      finalizeRide(cur, Date.now());
+      if (cur.points.length >= REC_MIN_POINTS || cur.distanceM >= REC_MIN_DIST_M){
+        var rides = loadRides();
+        rides.unshift(cur);
+        saveRides(rides);
+      }
+    }
+    renderRideList();
+  }
+
+  /* ---------- GPX ---------- */
+  function escXml(s){ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function isoTime(ms){ return new Date(ms).toISOString(); }
+  function rideName(ride){
+    var d = new Date(ride.start);
+    return 'Ride ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  function buildGpx(ride){
+    var name = (ride.imported && ride.name) ? ride.name : rideName(ride);
+    var out = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<gpx version="1.1" creator="GPS Speedometer" xmlns="http://www.topografix.com/GPX/1/1">',
+      '  <metadata><name>' + escXml(name) + '</name><time>' + isoTime(ride.start) + '</time></metadata>',
+      '  <trk><name>' + escXml(name) + '</name><trkseg>'
+    ];
+    ride.points.forEach(function(p){
+      var line = '    <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lon.toFixed(6) + '">';
+      if (p.ele != null) line += '<ele>' + p.ele + '</ele>';
+      line += '<time>' + isoTime(p.t) + '</time>';
+      if (p.spd != null) line += '<speed>' + p.spd + '</speed>';
+      line += '</trkpt>';
+      out.push(line);
+    });
+    out.push('  </trkseg></trk>', '</gpx>');
+    return out.join('\n');
+  }
+  function gpxFileName(ride){
+    var d = new Date(ride.start);
+    function p2(n){ return String(n).padStart(2, '0'); }
+    return 'ride-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '.gpx';
+  }
+  function downloadText(name, text, type){
+    var blob = new Blob([text], { type: type || 'application/gpx+xml' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+  }
+  function parseGpx(text){
+    var doc;
+    try { doc = new DOMParser().parseFromString(text, 'application/xml'); }
+    catch (e){ return null; }
+    if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+    var nodes = doc.getElementsByTagName('trkpt');
+    var points = [];
+    for (var i = 0; i < nodes.length; i++){
+      var el = nodes[i];
+      var lat = parseFloat(el.getAttribute('lat')), lon = parseFloat(el.getAttribute('lon'));
+      if (isNaN(lat) || isNaN(lon)) continue;
+      var p = { lat: lat, lon: lon, t: 0 };
+      var ele = el.getElementsByTagName('ele')[0];
+      if (ele && !isNaN(parseFloat(ele.textContent))) p.ele = parseFloat(ele.textContent);
+      var time = el.getElementsByTagName('time')[0];
+      if (time){ var t = Date.parse(time.textContent); if (!isNaN(t)) p.t = t; }
+      var spd = el.getElementsByTagName('speed')[0];
+      if (spd && !isNaN(parseFloat(spd.textContent))) p.spd = parseFloat(spd.textContent);
+      points.push(p);
+    }
+    if (points.length < 2) return null;
+    var now = Date.now();
+    points.forEach(function(p, i){ if (!p.t) p.t = now - (points.length - 1 - i) * 5000; });
+    var ride = newRide();
+    ride.points = points;
+    ride.imported = true;
+    ride.start = points[0].t;
+    var nameEl = doc.getElementsByTagName('name')[0];
+    ride.name = nameEl ? nameEl.textContent : null;
+    return finalizeRide(ride, points[points.length - 1].t);
+  }
+
+  /* ---------- Ride history rendering ---------- */
+  function fmtDist(m){ var d = U().dist(m); return (d < 10 ? d.toFixed(2) : d < 100 ? d.toFixed(1) : String(Math.round(d))) + ' ' + U().distLabel; }
+  function fmtSpeed(ms){ return String(Math.round(ms * U().speed)) + ' ' + U().label; }
+  function fmtGain(m){ return String(Math.round(m * U().alt)) + U().altLabel; }
+  function rideRow(ride, isCurrent){
+    var li = document.createElement('li');
+    li.className = 'ride-item' + (isCurrent ? ' recording' : '');
+    var top = document.createElement('div'); top.className = 'ride-top';
+    var date = document.createElement('span'); date.className = 'ride-date';
+    date.textContent = (ride.imported && ride.name) ? ride.name : rideName(ride);
+    top.appendChild(date);
+    var badge = document.createElement('span'); badge.className = 'ride-badge';
+    badge.textContent = isCurrent ? '● Recording' : (ride.imported ? 'Imported' : 'Saved');
+    top.appendChild(badge);
+    li.appendChild(top);
+    var stats = document.createElement('div'); stats.className = 'ride-stats';
+    function stat(label){
+      var s = document.createElement('span');
+      var b = document.createElement('b');
+      s.appendChild(document.createTextNode(label + ' '));
+      s.appendChild(b);
+      stats.appendChild(s);
+      return b;
+    }
+    var distB = stat('Distance'), durB = stat('Time'), topB = stat('Top'), avgB = stat('Avg'), gainB = stat('Climb');
+    li.appendChild(stats);
+    if (!isCurrent){
+      var actions = document.createElement('div'); actions.className = 'ride-actions';
+      var gpxBtn = document.createElement('button'); gpxBtn.type = 'button'; gpxBtn.className = 'ghost-btn'; gpxBtn.textContent = '↓ GPX';
+      gpxBtn.addEventListener('click', function(){ downloadText(gpxFileName(ride), buildGpx(ride)); });
+      var delBtn = document.createElement('button'); delBtn.type = 'button'; delBtn.className = 'ghost-btn danger'; delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', function(){
+        if (!window.confirm('Delete this ride? The route and stats go with it.')) return;
+        saveRides(loadRides().filter(function(r){ return r.id !== ride.id; }));
+        renderRideList();
+      });
+      actions.appendChild(gpxBtn); actions.appendChild(delBtn);
+      li.appendChild(actions);
+    }
+    if (isCurrent){
+      currentRowEls = { dist: distB, dur: durB, top: topB, avg: avgB, gain: gainB };
+      updateCurrentRideRow();
+    } else {
+      distB.textContent = fmtDist(ride.distanceM);
+      durB.textContent = formatTime(ride.durationMs);
+      topB.textContent = fmtSpeed(ride.maxMs);
+      avgB.textContent = fmtSpeed(ride.durationMs > 0 ? ride.distanceM / (ride.durationMs / 1000) : 0);
+      gainB.textContent = fmtGain(ride.gainM);
+    }
+    return li;
+  }
+  function renderRideList(){
+    currentRowEls = null;
+    var list = els.rideList;
+    if (!list) return;
+    list.innerHTML = '';
+    var rides = loadRides();
+    els.ridesEmpty.style.display = (rides.length || state.currentRide) ? 'none' : '';
+    if (state.currentRide) list.appendChild(rideRow(state.currentRide, true));
+    rides.forEach(function(r){ list.appendChild(rideRow(r, false)); });
+  }
+  function updateCurrentRideRow(){
+    if (!currentRowEls || !state.currentRide) return;
+    var ride = state.currentRide;
+    var st = rideStatsFromPoints(ride.points);
+    currentRowEls.dist.textContent = fmtDist(st.distanceM);
+    currentRowEls.dur.textContent = formatTime(Date.now() - ride.start);
+    currentRowEls.top.textContent = fmtSpeed(Math.max(ride.maxMs, st.maxMs));
+    var durS = Math.max(1, (Date.now() - ride.start) / 1000);
+    currentRowEls.avg.textContent = fmtSpeed(st.distanceM / durS);
+    currentRowEls.gain.textContent = fmtGain(st.gainM);
+  }
+  function wireGpxImport(){
+    if (!els.importGpxBtn || !els.importGpxFile) return;
+    els.importGpxBtn.addEventListener('click', function(){ els.importGpxFile.click(); });
+    els.importGpxFile.addEventListener('change', function(){
+      var file = els.importGpxFile.files && els.importGpxFile.files[0];
+      els.importGpxFile.value = '';
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(){
+        var ride = parseGpx(String(reader.result || ''));
+        if (!ride){
+          showNotice('error', '<strong>That file isn\'t a GPX track.</strong> Pick a .gpx file with a track in it — most ride apps export one.');
+          return;
+        }
+        var rides = loadRides();
+        rides.unshift(ride);
+        saveRides(rides);
+        renderRideList();
+        showNotice('', '');
+      };
+      reader.onerror = function(){
+        showNotice('error', '<strong>Couldn\'t read that file.</strong> Try again.');
+      };
+      reader.readAsText(file);
+    });
   }
 
   /* ---------- Colour: presets + slow drift ---------- */
@@ -747,6 +1050,7 @@
       : '—';
     els.resetBtn.disabled = !(state.totalMeters > 0 || elapsed > 0 || state.maxMs > 0);
     els.panelRideBtn.textContent = state.tracking ? 'Stop ride' : (state.paused && elapsed > 0 ? 'Resume ride' : 'Start ride');
+    updateCurrentRideRow();
   }
   function avgSpeedValue(){
     var elapsed = elapsedMs();
@@ -807,6 +1111,11 @@
       }
     }
     state.lastPos = { lat: c.latitude, lon: c.longitude, t: now };
+
+    if (state.tracking && !state.paused && state.currentRide){
+      if (smoothMs > state.currentRide.maxMs) state.currentRide.maxMs = smoothMs;
+      recordPoint(pos, now);
+    }
 
     if (state.accuracyM != null && state.accuracyM > 65){
       showNotice('warn', '<strong>Weak GPS.</strong> Accuracy is about ' + Math.round(state.accuracyM * 3.28084) + ' ft right now — speed may jump around. Open sky helps; keep the phone out of a pocket or bag.');
@@ -876,6 +1185,11 @@
     } else if (state.paused){
       state.paused = false; state.segmentStart = Date.now();
     }
+    if (!state.currentRide){
+      state.currentRide = newRide();
+      saveCurrent(state.currentRide);
+      renderRideList();
+    }
     startTimer();
     els.mainBtn.textContent = '■  Stop';
     els.mainBtn.classList.add('is-stop');
@@ -885,6 +1199,7 @@
   function stopTracking(){
     if (state.segmentStart){ state.elapsedBefore = elapsedMs(); state.segmentStart = null; }
     state.paused = true; state.tracking = false;
+    finishCurrentRide();
     els.mainBtn.innerHTML = '● &nbsp;Resume Ride';
     els.mainBtn.classList.remove('is-stop');
     setGpsStatus(state.fixes > 0 ? 'live' : '', state.fixes > 0 ? 'Paused — GPS still on' : 'GPS off — tap Start for a fix');
@@ -900,6 +1215,7 @@
     state.segmentStart = state.tracking ? Date.now() : null;
     state.startStamp = state.tracking ? Date.now() : null;
     state.fixes = 0;
+    state.currentRide = null; saveCurrent(null); renderRideList();
     showNotice('', '');
     if (!state.tracking) setGpsStatus('', 'GPS off — tap Start for a fix');
     render();
@@ -1254,6 +1570,22 @@
     shiftTick();
   }, 250);
   window.addEventListener('resize', function(){ shiftStep = -1; shiftTick(); });
+
+  // Recover a ride left open by a closed tab or a dead phone, then show history
+  (function(){
+    var orphan = loadCurrent();
+    saveCurrent(null);
+    if (orphan && orphan.points && orphan.points.length >= REC_MIN_POINTS){
+      finalizeRide(orphan, orphan.points[orphan.points.length - 1].t);
+      var rides = loadRides();
+      rides.unshift(orphan);
+      saveRides(rides);
+    }
+  })();
+  if (els.versionLine) els.versionLine.textContent = 'GPS Speedometer v' + APP_VERSION + ' · Rides stay on this device — no account, no cloud.';
+  window.addEventListener('pagehide', function(){ if (state.currentRide) saveCurrent(state.currentRide); });
+  wireGpxImport();
+  renderRideList();
 
   boxes.forEach(placeBox);
   refreshPanel();
