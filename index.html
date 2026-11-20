@@ -257,6 +257,53 @@
     .ro-speed{ font-size:calc(clamp(96px, 30vh, 160px) * var(--spd-scale, 1)); }
     .simple-view .ro-speed{ font-size:calc(clamp(120px, min(44vw, 62vh), 320px) * var(--spd-scale, 1)); }
   }
+  /* ---------- Navigation: turn-by-turn arrows ---------- */
+  .nav-section{ margin-top:20px; }
+  .nav-row{ display:flex; gap:10px; margin-top:12px; }
+  .nav-input{
+    flex:1; min-width:0; background:var(--panel-2); color:var(--ink);
+    border:1px solid var(--line-strong); border-radius:6px; padding:13px 12px;
+    font:600 16px/1.2 "Archivo Narrow",sans-serif; min-height:48px;
+  }
+  .nav-input::placeholder{ color:var(--muted); }
+  .nav-results{ list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .nav-results button{
+    width:100%; text-align:left; background:var(--panel); border:1px solid var(--line);
+    border-radius:6px; color:var(--ink); padding:12px; font:500 15px/1.4 "Archivo Narrow",sans-serif;
+    cursor:pointer; min-height:48px;
+  }
+  .nav-results button:active{ transform:translate(1px,1px); }
+  .nav-confirm{ margin-top:12px; background:var(--panel); border:1px solid var(--accent); border-radius:6px; padding:14px; }
+  .nav-confirm-name{ font-size:17px; font-weight:700; color:var(--ink); line-height:1.35; }
+  .nav-confirm-sub{ margin-top:4px; font-size:14px; color:var(--muted); }
+  .nav-status{ margin-top:12px; font-size:14.5px; line-height:1.5; color:var(--muted); }
+  .nav-status strong{ color:var(--ink); }
+  .nav-attrib{ margin-top:10px; font-size:12.5px; line-height:1.5; color:var(--muted); }
+  .nav-view{ position:fixed; inset:0; z-index:70; background:#000; color:#f4f4f8; overflow-y:auto; -webkit-tap-highlight-color:transparent; }
+  .nav-view[hidden]{ display:none; }
+  .nav-view-inner{ max-width:680px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; min-height:100dvh; }
+  .nav-kicker{ text-align:center; font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent-bright); font-weight:600; }
+  .nav-speed{ text-align:center; font-weight:700; font-size:clamp(96px, 30vw, 170px); line-height:.95; font-variant-numeric:tabular-nums; text-shadow:0 0 30px rgba(255,255,255,.35); }
+  .nav-speed small{ font-size:22px; color:#aaa; }
+  .nav-arrow-wrap{ margin:8px auto 0; width:170px; height:170px; display:flex; align-items:center; justify-content:center; }
+  .nav-turn-label{ text-align:center; font-size:14px; letter-spacing:.18em; text-transform:uppercase; color:#aaa; }
+  .nav-turn-dist{ text-align:center; font-size:52px; font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; }
+  .nav-street{ text-align:center; font-size:22px; font-weight:600; color:#e8e8e8; }
+  .nav-next{ text-align:center; font-size:15px; color:var(--accent-bright); margin-top:8px; min-height:20px; }
+  .nav-meta{ display:flex; justify-content:space-between; gap:10px; border-top:1px solid #333; margin-top:18px; padding-top:12px; font-size:14px; color:#aaa; }
+  .nav-meta b{ color:#fff; }
+  .nav-heading-line{ text-align:center; font-size:14px; color:#aaa; margin-top:8px; }
+  .nav-offroute{ margin-top:16px; background:var(--amber-bg); border:1px solid var(--chip-line); border-radius:6px; padding:14px; color:var(--ink-soft); font-size:15px; line-height:1.5; }
+  .nav-offroute[hidden]{ display:none; }
+  .nav-arrived{ margin-top:16px; background:var(--green-bg); border:1px solid var(--line); border-radius:6px; padding:14px; color:var(--ink-soft); font-size:16px; line-height:1.5; text-align:center; }
+  .nav-arrived[hidden]{ display:none; }
+  .nav-end{ margin-top:18px; }
+  .url-label{ font-size:14px; color:var(--ink-soft); font-weight:600; }
+  .url-input{
+    width:100%; background:var(--panel-2); color:var(--ink); border:1px solid var(--line-strong);
+    border-radius:6px; padding:11px 10px; font:500 14px/1.3 "Archivo Narrow",sans-serif;
+    min-height:44px; margin:2px 0 10px;
+  }
 </style>
 </head>
 <body>
@@ -380,6 +427,28 @@
     <p class="hint">Speed is GPS speed, so it lags a second or two behind the bike and drops to 0 in tunnels. If it reads 0 while you're moving, check that location is set to <b>Precise / High accuracy</b> and this page has permission. Don't interact with the phone while riding — glance only.</p>
   </div>
 
+  <section class="nav-section" aria-label="Navigate">
+    <div class="rides-head">
+      <div class="rides-title">Navigate</div>
+      <button type="button" class="ghost-btn" id="navResumeBtn" hidden>Resume route</button>
+    </div>
+    <p class="nav-status" id="navStatus">No route yet. Type a place below and the speedo will guide you turn by turn, Beeline-style — one big arrow, the distance to the next turn, and the street name.</p>
+    <div class="nav-row">
+      <input type="text" class="nav-input" id="destInput" placeholder="Where to? An address or place name" autocomplete="off" enterkeyhint="search" aria-label="Destination">
+      <button type="button" class="ghost-btn" id="destSearchBtn" style="flex:none; padding:12px 16px;">Find place</button>
+    </div>
+    <ul class="nav-results" id="destResults"></ul>
+    <div class="nav-confirm" id="destConfirm" hidden>
+      <div class="nav-confirm-name" id="destConfirmName"></div>
+      <div class="nav-confirm-sub" id="destConfirmSub"></div>
+      <div class="row-btns">
+        <button type="button" class="ghost-btn" id="destRouteBtn">Route here</button>
+        <button type="button" class="ghost-btn" id="destCancelBtn">Cancel</button>
+      </div>
+    </div>
+    <p class="nav-attrib">Routes come from Valhalla or OSRM on &copy; OpenStreetMap contributors (ODbL) data; places from Nominatim. Only the route request itself — your position and the destination — goes to the server picked in Settings. No account, no identifier, no location history, no ride data ever leaves the phone. Point the servers at your own hardware in Settings and no third party is involved at all.</p>
+  </section>
+
   <section class="rides" aria-label="Ride history">
     <div class="rides-head">
       <div class="rides-title">Ride history</div>
@@ -457,6 +526,16 @@
       <span class="rng-wrap"><input type="range" id="rngLabelSize" min="100" max="300" step="25" value="100" aria-label="Max and heading size percent"><span class="val" id="valLabelSize">100%</span></span>
     </div>
 
+    <div class="sect">Routing</div>
+    <p class="install-note" style="border:0; padding-top:0; margin-top:6px;">Route requests go to these servers. Defaults are the free public ones (Valhalla, then OSRM as fallback; Nominatim for place search). Point them at your own Valhalla / Nominatim and the app talks to your hardware instead &mdash; no code change, no third party.</p>
+    <label class="url-label" for="cfgValhalla">Valhalla route server</label>
+    <input type="url" class="url-input" id="cfgValhalla" inputmode="url" autocomplete="off" spellcheck="false">
+    <label class="url-label" for="cfgOsrm">OSRM fallback server</label>
+    <input type="url" class="url-input" id="cfgOsrm" inputmode="url" autocomplete="off" spellcheck="false">
+    <label class="url-label" for="cfgNominatim">Nominatim place search</label>
+    <input type="url" class="url-input" id="cfgNominatim" inputmode="url" autocomplete="off" spellcheck="false">
+    <button type="button" class="ghost-btn" id="cfgEndpointsReset" style="margin-bottom:6px;">Reset routing servers to defaults</button>
+
     <div class="panel-divider"></div>
     <button type="button" class="panel-action" id="panelRideBtn">Start ride</button>
     <button type="button" class="panel-action" id="resetMaxBtn">Reset max speed</button>
@@ -485,6 +564,55 @@
     </div>
   </div>
   <div class="simple-exit" aria-hidden="true">Tap for settings</div>
+</div>
+
+<!-- Turn-by-turn navigation view -->
+<div class="nav-view" id="navView" hidden aria-label="Turn by turn navigation">
+  <div class="nav-view-inner">
+    <div class="nav-kicker" id="navKicker">Navigating to &hellip;</div>
+    <div class="nav-speed"><span id="navSpeed">0</span><small class="unitLabel"> mph</small></div>
+    <div class="nav-arrow-wrap" id="navArrowWrap">
+      <svg id="navArrowSvg" width="160" height="160" viewBox="0 0 140 140" aria-hidden="true">
+        <g id="navArrowStraight" style="display:none">
+          <path d="M70 128 L70 34" fill="none" stroke="#9d6bff" stroke-width="20" stroke-linecap="round"/>
+          <path d="M52 52 L70 24 L88 52 Z" fill="#9d6bff" stroke="#e8e8e8" stroke-width="2"/>
+        </g>
+        <g id="navArrowLeft" style="display:none">
+          <path d="M95 128 L95 62 Q95 34 66 34 L22 34" fill="none" stroke="#9d6bff" stroke-width="20" stroke-linecap="round"/>
+          <path d="M40 18 L14 34 L40 50 Z" fill="#9d6bff" stroke="#e8e8e8" stroke-width="2"/>
+        </g>
+        <g id="navArrowRight" style="display:none">
+          <path d="M45 128 L45 62 Q45 34 74 34 L118 34" fill="none" stroke="#9d6bff" stroke-width="20" stroke-linecap="round"/>
+          <path d="M100 18 L126 34 L100 50 Z" fill="#9d6bff" stroke="#e8e8e8" stroke-width="2"/>
+        </g>
+        <g id="navArrowUturn" style="display:none">
+          <path d="M100 130 L100 62 Q100 30 70 30 Q40 30 40 62 L40 100" fill="none" stroke="#9d6bff" stroke-width="20" stroke-linecap="round"/>
+          <path d="M26 84 L40 112 L54 84 Z" fill="#9d6bff" stroke="#e8e8e8" stroke-width="2"/>
+        </g>
+        <g id="navArrowArrive" style="display:none">
+          <circle cx="70" cy="70" r="52" fill="none" stroke="#7ee787" stroke-width="8"/>
+          <path d="M46 72 L64 90 L96 50" fill="none" stroke="#7ee787" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
+    </div>
+    <div class="nav-turn-label" id="navTurnLabel">Next turn</div>
+    <div class="nav-turn-dist" id="navTurnDist">&mdash;</div>
+    <div class="nav-street" id="navStreet"></div>
+    <div class="nav-next" id="navNext"></div>
+    <div class="nav-meta">
+      <span><b id="navRemaining">&mdash;</b> to go</span>
+      <span>ETA <b id="navEta">&mdash;</b></span>
+    </div>
+    <div class="nav-heading-line" id="navHeadingLine">Heading &mdash;</div>
+    <div class="nav-heading-line" id="navCompassNote" hidden>Phone compass unavailable &mdash; the arrow uses your last GPS course. It straightens out once you&rsquo;re rolling.</div>
+    <div class="nav-offroute" id="navOffRoute" hidden>
+      <strong>Off route.</strong> <span id="navOffRouteText">You&rsquo;re off the line.</span><br>
+      Ride back toward the route and guidance picks up on its own &mdash; or re-route from where you are now. Re-routing needs signal.
+      <div class="row-btns"><button type="button" class="ghost-btn" id="navRerouteBtn">Re-route from here</button></div>
+    </div>
+    <div class="nav-arrived" id="navArrived" hidden><strong>You made it.</strong><br><span id="navArrivedText"></span></div>
+    <button type="button" class="ghost-btn nav-end" id="navEndBtn">End navigation</button>
+  </div>
 </div>
 
 <script>
@@ -608,7 +736,7 @@
      A ride is one Start → Stop session. A tap that goes nowhere
      (under 5 track points and under 50 m) is not saved. If the tab
      closes mid-ride, the in-progress ride is recovered on next load. */
-  var APP_VERSION = '1.1.0';
+  var APP_VERSION = '1.2.0';
   var RIDES_KEY = 'gpsSpeedo.rides.v1';
   var CURRENT_KEY = 'gpsSpeedo.current.v1';
   var MAX_RIDES = 30;
@@ -807,6 +935,11 @@
         saveRides(loadRides().filter(function(r){ return r.id !== ride.id; }));
         renderRideList();
       });
+      if (ride.points && ride.points.length >= 2){
+        var followBtn = document.createElement('button'); followBtn.type = 'button'; followBtn.className = 'ghost-btn'; followBtn.textContent = 'Follow';
+        followBtn.addEventListener('click', function(){ startGpxFollow(ride); });
+        actions.appendChild(followBtn);
+      }
       actions.appendChild(gpxBtn); actions.appendChild(delBtn);
       li.appendChild(actions);
     }
@@ -1051,6 +1184,7 @@
     els.resetBtn.disabled = !(state.totalMeters > 0 || elapsed > 0 || state.maxMs > 0);
     els.panelRideBtn.textContent = state.tracking ? 'Stop ride' : (state.paused && elapsed > 0 ? 'Resume ride' : 'Start ride');
     updateCurrentRideRow();
+    renderNav();
   }
   function avgSpeedValue(){
     var elapsed = elapsedMs();
@@ -1125,6 +1259,7 @@
     setGpsStatus('live', 'GPS live · ±' + (state.accuracyM ? Math.round(state.accuracyM * 3.28084) + ' ft' : '—'));
     els.info.classList.remove('show');
     render();
+    navOnFix();
   }
   function onError(err){
     var msg = '';
@@ -1148,7 +1283,7 @@
   }
   // Watchdog: a fix older than 4 s dims the readout; older than 20 s the fix is dropped
   setInterval(function(){
-    if (!state.tracking || !state.lastFixT) return;
+    if ((!state.tracking && !navActive()) || !state.lastFixT) return;
     var age = Date.now() - state.lastFixT;
     if (age > 20000 && state.hasFix){
       state.hasFix = false; state.smoothKmh = 0; state.stale = false;
@@ -1173,11 +1308,7 @@
     showNotice('', '');
     setGpsStatus('searching', 'Finding GPS…');
     els.info.classList.remove('show');
-    if (state.watchId == null){
-      state.watchId = navigator.geolocation.watchPosition(onPosition, onError, {
-        enableHighAccuracy: true, maximumAge: 0, timeout: 20000
-      });
-    }
+    ensureWatch();
     if (!state.tracking){
       state.tracking = true; state.paused = false;
       state.segmentStart = Date.now();
@@ -1203,7 +1334,7 @@
     els.mainBtn.innerHTML = '● &nbsp;Resume Ride';
     els.mainBtn.classList.remove('is-stop');
     setGpsStatus(state.fixes > 0 ? 'live' : '', state.fixes > 0 ? 'Paused — GPS still on' : 'GPS off — tap Start for a fix');
-    stopTimer();
+    if (!navActive()) stopTimer();
     render();
   }
   els.mainBtn.addEventListener('click', function(){
@@ -1571,6 +1702,591 @@
   }, 250);
   window.addEventListener('resize', function(){ shiftStep = -1; shiftTick(); });
 
+  /* ---------- Navigation: turn-by-turn arrows ----------
+     Route planning, Beeline-style. Destination → Nominatim geocode →
+     Valhalla (motorcycle) route, OSRM demo as fallback. The fetched route
+     is cached on-device; guidance runs from the cache, no signal needed
+     after the fetch. Endpoints are user-configurable in Settings so the
+     app can point at a self-hosted Valhalla with no code change.
+     Privacy: the only thing that ever leaves the phone is the route
+     request itself (start + destination coordinates) to the configured
+     server. No account, no identifier, no location history, no ride
+     data, no analytics, no telemetry — nothing else. */
+  var ENDPOINT_DEFAULTS = {
+    valhalla: 'https://valhalla1.openstreetmap.de/route',
+    osrm: 'https://router.project-osrm.org/route/v1/driving',
+    nominatim: 'https://nominatim.openstreetmap.org/search'
+  };
+  var ENDPOINTS_KEY = 'gpsSpeedo.navEndpoints.v1';
+  var NAV_ROUTE_KEY = 'gpsSpeedo.navRoute.v1';
+  var OFF_ROUTE_M = 50;   // further than this off the line = off route
+  var ARRIVE_M = 20;      // this close to the destination = arrived
+  var ROUTE_FETCH_MS = 20000;
+
+  var navEls = {
+    status: $('navStatus'), destInput: $('destInput'), destSearchBtn: $('destSearchBtn'),
+    destResults: $('destResults'), destConfirm: $('destConfirm'),
+    destConfirmName: $('destConfirmName'), destConfirmSub: $('destConfirmSub'),
+    destRouteBtn: $('destRouteBtn'), destCancelBtn: $('destCancelBtn'),
+    resumeBtn: $('navResumeBtn'),
+    view: $('navView'), kicker: $('navKicker'), speed: $('navSpeed'),
+    turnLabel: $('navTurnLabel'), turnDist: $('navTurnDist'),
+    street: $('navStreet'), next: $('navNext'),
+    remaining: $('navRemaining'), eta: $('navEta'),
+    headingLine: $('navHeadingLine'), compassNote: $('navCompassNote'),
+    offRoute: $('navOffRoute'), offRouteText: $('navOffRouteText'),
+    rerouteBtn: $('navRerouteBtn'), arrived: $('navArrived'),
+    arrivedText: $('navArrivedText'), endBtn: $('navEndBtn'),
+    cfgValhalla: $('cfgValhalla'), cfgOsrm: $('cfgOsrm'), cfgNominatim: $('cfgNominatim'),
+    cfgReset: $('cfgEndpointsReset')
+  };
+
+  var nav = {
+    active: false, route: null, destName: '', source: '',
+    nextIdx: 1, alongM: 0, offRoute: false, offDist: 0, arrived: false,
+    lastNearestIdx: 0,
+    compassDeg: null, compassOk: false, compassAsked: false, compassDenied: false
+  };
+
+  function navActive(){ return !!(nav && nav.active); }
+
+  /* ----- Endpoints: user-configurable, defaults are the free public servers ----- */
+  function normalizeEndpoint(v, fallback){
+    v = String(v == null ? '' : v).trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(v)) return fallback;
+    return v;
+  }
+  function loadEndpoints(){
+    var ep = { valhalla: ENDPOINT_DEFAULTS.valhalla, osrm: ENDPOINT_DEFAULTS.osrm, nominatim: ENDPOINT_DEFAULTS.nominatim };
+    try {
+      var raw = localStorage.getItem(ENDPOINTS_KEY);
+      if (raw){
+        var o = JSON.parse(raw) || {};
+        if (o.valhalla) ep.valhalla = normalizeEndpoint(o.valhalla, ep.valhalla);
+        if (o.osrm) ep.osrm = normalizeEndpoint(o.osrm, ep.osrm);
+        if (o.nominatim) ep.nominatim = normalizeEndpoint(o.nominatim, ep.nominatim);
+      }
+    } catch (e){}
+    return ep;
+  }
+  function saveEndpoints(ep){
+    try { localStorage.setItem(ENDPOINTS_KEY, JSON.stringify(ep)); } catch (e){}
+  }
+  function refreshEndpointInputs(){
+    var ep = loadEndpoints();
+    navEls.cfgValhalla.value = ep.valhalla;
+    navEls.cfgOsrm.value = ep.osrm;
+    navEls.cfgNominatim.value = ep.nominatim;
+  }
+
+  /* ----- Geometry helpers ----- */
+  function decodePolyline(str, precision){
+    var coords = [], index = 0, lat = 0, lng = 0;
+    var factor = Math.pow(10, precision == null ? 6 : precision);
+    while (index < str.length){
+      var shift = 0, result = 0, b;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift = 0; result = 0;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+      coords.push({ lat: lat / factor, lon: lng / factor });
+    }
+    return coords;
+  }
+  function routeCumDist(points){
+    var cum = [0];
+    for (var i = 1; i < points.length; i++){
+      cum.push(cum[i - 1] + haversine(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon));
+    }
+    return cum;
+  }
+  function bearingBetween(a, b){
+    var dLon = (b.lon - a.lon) * Math.PI / 180;
+    var lat1 = a.lat * Math.PI / 180, lat2 = b.lat * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(lat2);
+    var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+  function angleDiff(to, from){
+    var d = (to - from) % 360;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return d;
+  }
+  function nearestOnRoute(route, lat, lon, fromIdx){
+    var pts = route.points, cum = route.cum;
+    if (!pts || pts.length < 2) return { segIdx: 0, alongM: 0, distM: 1e9 };
+    var start = Math.max(0, (fromIdx || 0) - 3);
+    var end = Math.min(pts.length - 2, (fromIdx || 0) + 80);
+    if (end < start){ start = 0; end = pts.length - 2; }
+    var best = null;
+    for (var i = start; i <= end; i++){
+      var a = pts[i], b = pts[i + 1];
+      var cosLat = Math.cos(a.lat * Math.PI / 180);
+      var bx = (b.lon - a.lon) * 111320 * cosLat, by = (b.lat - a.lat) * 110540;
+      var px = (lon - a.lon) * 111320 * cosLat, py = (lat - a.lat) * 110540;
+      var len2 = bx * bx + by * by;
+      var t = len2 > 0 ? Math.max(0, Math.min(1, (px * bx + py * by) / len2)) : 0;
+      var dx = px - t * bx, dy = py - t * by;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var along = cum[i] + t * (cum[i + 1] - cum[i]);
+      if (!best || dist < best.distM) best = { segIdx: i, alongM: along, distM: dist };
+    }
+    return best || { segIdx: 0, alongM: 0, distM: 1e9 };
+  }
+
+  /* ----- Route normalisation: one internal shape, three sources ----- */
+  function valhallaKind(t){
+    if (t === 4 || t === 5 || t === 6) return 'arrive';
+    if (t === 12 || t === 13) return 'uturn';
+    if (t === 9 || t === 10 || t === 11 || t === 18 || t === 20 || t === 23) return 'right';
+    if (t === 14 || t === 15 || t === 16 || t === 19 || t === 21 || t === 24) return 'left';
+    return 'straight';
+  }
+  function osrmKind(man){
+    if (!man) return 'straight';
+    if (man.type === 'arrive') return 'arrive';
+    if (man.type === 'depart') return 'straight';
+    if (man.type === 'uturn') return 'uturn';
+    var mod = man.modifier || '';
+    if (mod.indexOf('left') !== -1) return 'left';
+    if (mod.indexOf('right') !== -1) return 'right';
+    return 'straight';
+  }
+  function normalizeValhalla(data, destName){
+    if (!data || !data.trip || !data.trip.legs || !data.trip.legs.length) throw new Error('bad valhalla response');
+    var leg = data.trip.legs[0];
+    if (!leg.shape || !leg.maneuvers) throw new Error('bad valhalla leg');
+    var points = decodePolyline(leg.shape, 6);
+    if (points.length < 2) throw new Error('route too short');
+    var cum = routeCumDist(points);
+    var mans = leg.maneuvers.map(function(m){
+      var idx = Math.min(m.begin_shape_index || 0, points.length - 1);
+      return { kind: valhallaKind(m.type), street: (m.street_names && m.street_names[0]) || '', atM: cum[idx], atIdx: idx };
+    });
+    var last = mans[mans.length - 1];
+    if (!last || last.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
+    var totalM = (data.trip.summary && data.trip.summary.length) ? data.trip.summary.length * 1609.344 : cum[cum.length - 1];
+    var totalS = (data.trip.summary && data.trip.summary.time) || 0;
+    return { source: 'valhalla', destName: destName, points: points, cum: cum, maneuvers: mans, totalM: totalM, totalS: totalS, fetchedAt: Date.now() };
+  }
+  function normalizeOsrm(data, destName){
+    if (!data || data.code !== 'Ok' || !data.routes || !data.routes.length) throw new Error('bad osrm response');
+    var route = data.routes[0];
+    var steps = (route.legs && route.legs[0] && route.legs[0].steps) || [];
+    if (!steps.length) throw new Error('no osrm steps');
+    var points = [], mans = [];
+    steps.forEach(function(st){
+      var coords = (st.geometry && st.geometry.coordinates) || [];
+      var stepStartIdx = points.length;
+      coords.forEach(function(c, ci){
+        if (points.length && ci === 0){ stepStartIdx = points.length - 1; return; }
+        points.push({ lat: c[1], lon: c[0] });
+      });
+      stepStartIdx = Math.min(stepStartIdx, points.length - 1);
+      mans.push({ kind: osrmKind(st.maneuver), street: st.name || '', atM: 0, atIdx: stepStartIdx });
+    });
+    if (points.length < 2) throw new Error('route too short');
+    var cum = routeCumDist(points);
+    mans.forEach(function(m){ m.atM = cum[m.atIdx]; });
+    var last = mans[mans.length - 1];
+    if (!last || last.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
+    return { source: 'osrm', destName: destName, points: points, cum: cum, maneuvers: mans, totalM: route.distance || cum[cum.length - 1], totalS: route.duration || 0, fetchedAt: Date.now() };
+  }
+  function maneuversFromTrack(points, cum){
+    // A GPX track has no turn instructions — read the turns out of the
+    // geometry: a sustained bearing change of 35° or more is a turn.
+    var mans = [{ kind: 'straight', street: '', atM: 0, atIdx: 0 }];
+    var lastTurnM = -1000;
+    for (var i = 2; i < points.length - 2; i++){
+      var a = points[Math.max(0, i - 2)], b = points[i], c = points[Math.min(points.length - 1, i + 2)];
+      var delta = angleDiff(bearingBetween(b, c), bearingBetween(a, b));
+      if (Math.abs(delta) >= 35 && cum[i] - lastTurnM > 60){
+        mans.push({ kind: delta > 0 ? 'right' : 'left', street: '', atM: cum[i], atIdx: i });
+        lastTurnM = cum[i];
+      }
+    }
+    mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
+    return mans;
+  }
+  function buildRouteFromRide(ride, name){
+    var points = ride.points.map(function(p){ return { lat: p.lat, lon: p.lon }; });
+    var cum = routeCumDist(points);
+    var totalM = cum[cum.length - 1];
+    var totalS = ride.durationMs ? ride.durationMs / 1000 : totalM / 8;
+    return { source: 'gpx', destName: name, points: points, cum: cum, maneuvers: maneuversFromTrack(points, cum), totalM: totalM, totalS: totalS, fetchedAt: Date.now() };
+  }
+
+  /* ----- Network: geocode + route fetch (public servers by default) ----- */
+  function fetchWithTimeout(url, opts, ms){
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = null;
+    if (ctrl) timer = setTimeout(function(){ try { ctrl.abort(); } catch (e){} }, ms || ROUTE_FETCH_MS);
+    var o = opts || {};
+    if (ctrl) o.signal = ctrl.signal;
+    return fetch(url, o).then(function(r){
+      if (timer) clearTimeout(timer);
+      return r;
+    }, function(e){
+      if (timer) clearTimeout(timer);
+      throw e;
+    });
+  }
+  function geocodePlace(q){
+    var ep = loadEndpoints();
+    var url = ep.nominatim + '?format=json&limit=5&addressdetails=0&accept-language=en&q=' + encodeURIComponent(q);
+    return fetchWithTimeout(url, { headers: { 'Accept': 'application/json' } }, 15000)
+      .then(function(r){ if (!r.ok) throw new Error('geocode ' + r.status); return r.json(); })
+      .then(function(arr){
+        if (!Array.isArray(arr)) throw new Error('bad geocode response');
+        return arr.map(function(p){
+          return { name: p.display_name || 'Unnamed place', lat: parseFloat(p.lat), lon: parseFloat(p.lon) };
+        }).filter(function(p){ return !isNaN(p.lat) && !isNaN(p.lon); });
+      });
+  }
+  function fetchRouteValhalla(from, to, destName){
+    var ep = loadEndpoints();
+    return fetchWithTimeout(ep.valhalla, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat: from.lat, lon: from.lon }, { lat: to.lat, lon: to.lon }],
+        costing: 'motorcycle',
+        directions_options: { units: 'miles' }
+      })
+    }).then(function(r){
+      if (!r.ok) throw new Error('valhalla ' + r.status);
+      return r.json();
+    }).then(function(d){ return normalizeValhalla(d, destName); });
+  }
+  function fetchRouteOsrm(from, to, destName){
+    var ep = loadEndpoints();
+    var url = ep.osrm + '/' + from.lon + ',' + from.lat + ';' + to.lon + ',' + to.lat + '?steps=true&overview=full&geometries=geojson';
+    return fetchWithTimeout(url, {}, 20000)
+      .then(function(r){ if (!r.ok) throw new Error('osrm ' + r.status); return r.json(); })
+      .then(function(d){ return normalizeOsrm(d, destName); });
+  }
+  function fetchRoute(from, to, destName){
+    return fetchRouteValhalla(from, to, destName)
+      .then(function(route){ return { route: route, source: 'valhalla' }; })
+      .catch(function(){
+        return fetchRouteOsrm(from, to, destName)
+          .then(function(route){ return { route: route, source: 'osrm' }; });
+      });
+  }
+
+  /* ----- Route cache: guidance runs from this, no signal needed ----- */
+  function saveNavRoute(route, destName, source, active){
+    try {
+      localStorage.setItem(NAV_ROUTE_KEY, JSON.stringify({ route: route, destName: destName, source: source, active: !!active, savedAt: Date.now() }));
+    } catch (e){}
+  }
+  function loadNavRoute(){
+    try {
+      var raw = localStorage.getItem(NAV_ROUTE_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (!o || !o.route || !o.route.points || o.route.points.length < 2) return null;
+      return o;
+    } catch (e){ return null; }
+  }
+
+  /* ----- GPS watch without starting a ride recording ----- */
+  function ensureWatch(){
+    if (!('geolocation' in navigator)) return false;
+    if (state.watchId == null){
+      state.watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true, maximumAge: 0, timeout: 20000
+      });
+      setGpsStatus('searching', 'Finding GPS…');
+    }
+    return true;
+  }
+
+  /* ----- Phone compass (heading when slow or stopped) ----- */
+  function enableCompass(){
+    if (nav.compassAsked) return;
+    nav.compassAsked = true;
+    function onOrient(e){
+      var h = null;
+      if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading)) h = e.webkitCompassHeading;
+      else if (e.alpha != null) h = (360 - e.alpha) % 360;
+      if (h != null){ nav.compassDeg = h; nav.compassOk = true; }
+    }
+    function denied(){ nav.compassDenied = true; }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      DeviceOrientationEvent.requestPermission().then(function(s){
+        if (s === 'granted') window.addEventListener('deviceorientation', onOrient);
+        else denied();
+      }).catch(denied);
+    } else if ('DeviceOrientationEvent' in window){
+      window.addEventListener('deviceorientationabsolute', onOrient);
+      window.addEventListener('deviceorientation', onOrient);
+      setTimeout(function(){ if (!nav.compassOk) nav.compassDenied = true; }, 5000);
+    } else {
+      nav.compassDenied = true;
+    }
+  }
+
+  /* ----- Guidance ----- */
+  function fmtTurnDist(m){
+    if (m < 400) return Math.round(m * 3.28084) + ' ft';
+    var mi = m / 1609.344;
+    return (mi < 10 ? mi.toFixed(1) : String(Math.round(mi))) + ' mi';
+  }
+  function fmtClock(ms){
+    var d = new Date(ms);
+    var h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+    var ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return h + ':' + m + ' ' + ampm;
+  }
+  function turnLabel(kind){
+    if (kind === 'left') return 'Turn left in';
+    if (kind === 'right') return 'Turn right in';
+    if (kind === 'uturn') return 'U-turn in';
+    if (kind === 'arrive') return 'Destination in';
+    return 'Continue for';
+  }
+  function setArrow(kind){
+    var ids = { straight: 'navArrowStraight', left: 'navArrowLeft', right: 'navArrowRight', uturn: 'navArrowUturn', arrive: 'navArrowArrive' };
+    Object.keys(ids).forEach(function(k){
+      var el = $(ids[k]);
+      if (el) el.style.display = (k === kind) ? '' : 'none';
+    });
+  }
+  function nextNextText(mans, idx, route){
+    var after = mans[idx + 1];
+    if (!after) return '';
+    var gap = Math.max(0, after.atM - mans[idx].atM);
+    if (after.kind === 'arrive') return 'then you arrive · ' + fmtTurnDist(gap);
+    var dir = after.kind === 'left' ? 'left' : after.kind === 'right' ? 'right' : after.kind === 'uturn' ? 'U-turn' : 'continue';
+    var street = after.street ? ' on ' + after.street : (route.source === 'gpx' ? ' on the track' : '');
+    return 'then ' + dir + street + ' · ' + fmtTurnDist(gap);
+  }
+  function openNavView(){
+    navEls.view.hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+  function closeNavView(){
+    navEls.view.hidden = true;
+    document.body.style.overflow = '';
+  }
+  function startNavigation(route, destName, source){
+    nav.route = route; nav.destName = destName; nav.source = source;
+    nav.active = true; nav.nextIdx = 1; nav.alongM = 0;
+    nav.offRoute = false; nav.offDist = 0; nav.arrived = false;
+    nav.lastNearestIdx = 0;
+    nav.compassDeg = null; nav.compassOk = false; nav.compassAsked = false; nav.compassDenied = false;
+    saveNavRoute(route, destName, source, true);
+    navEls.kicker.textContent = 'Navigating to ' + destName;
+    enableCompass();
+    ensureWatch();
+    startTimer();
+    openNavView();
+    updateNavStatus();
+    renderNav();
+  }
+  function endNavigation(){
+    nav.active = false;
+    if (nav.route) saveNavRoute(nav.route, nav.destName, nav.source, false);
+    closeNavView();
+    updateNavStatus();
+  }
+  function navOnFix(){
+    if (!nav.active || !nav.route || !state.lastPos) return;
+    var near = nearestOnRoute(nav.route, state.lastPos.lat, state.lastPos.lon, nav.lastNearestIdx);
+    nav.lastNearestIdx = near.segIdx;
+    nav.alongM = near.alongM;
+    nav.offDist = near.distM;
+    nav.offRoute = near.distM > OFF_ROUTE_M;
+    var mans = nav.route.maneuvers;
+    while (nav.nextIdx < mans.length - 1 && mans[nav.nextIdx].atM < nav.alongM - 10) nav.nextIdx++;
+    var next = mans[nav.nextIdx];
+    if (!nav.arrived && next && next.kind === 'arrive' && (next.atM - nav.alongM) <= ARRIVE_M) nav.arrived = true;
+    if (!nav.arrived && (nav.route.totalM - nav.alongM) <= ARRIVE_M) nav.arrived = true;
+    renderNav();
+  }
+  function renderNav(){
+    if (!nav.active || !nav.route) return;
+    var mans = nav.route.maneuvers;
+    var idx = Math.min(nav.nextIdx, mans.length - 1);
+    var next = mans[idx];
+    navEls.speed.textContent = String(Math.round(currentSpeedValue()));
+    setArrow(next.kind);
+    navEls.turnLabel.textContent = turnLabel(next.kind);
+    navEls.turnDist.textContent = fmtTurnDist(Math.max(0, next.atM - nav.alongM));
+    if (next.kind === 'arrive') navEls.street.textContent = nav.destName;
+    else navEls.street.textContent = next.street || (nav.route.source === 'gpx' ? 'on the track' : '');
+    navEls.next.textContent = nextNextText(mans, idx, nav.route);
+    var remM = Math.max(0, nav.route.totalM - nav.alongM);
+    navEls.remaining.textContent = fmtDist(remM);
+    var speedMs = state.smoothKmh > 5 ? state.smoothKmh / 3.6 : (nav.route.totalS > 0 ? nav.route.totalM / nav.route.totalS : 8);
+    navEls.eta.textContent = fmtClock(Date.now() + (remM / Math.max(1, speedMs)) * 1000);
+    if (!state.hasFix){
+      navEls.headingLine.textContent = 'Waiting for a GPS fix…';
+    } else {
+      var hdg = nav.compassDeg != null ? nav.compassDeg : state.headingDeg;
+      navEls.headingLine.textContent = hdg != null
+        ? 'Heading ' + cardinal(hdg) + ' ' + Math.round(hdg) + '°' + (nav.compassDeg != null ? ' · phone compass' : ' · GPS course')
+        : 'Heading —';
+    }
+    navEls.compassNote.hidden = !nav.compassDenied;
+    navEls.offRoute.hidden = !nav.offRoute;
+    if (nav.offRoute){
+      var offFt = Math.round(nav.offDist * 3.28084);
+      navEls.offRouteText.textContent = 'You\'re about ' + (offFt < 1000 ? offFt + ' ft' : (nav.offDist / 1609.344).toFixed(1) + ' mi') + ' off the line.';
+    }
+    navEls.arrived.hidden = !nav.arrived;
+    if (nav.arrived) navEls.arrivedText.textContent = nav.destName + ' — ' + fmtDist(nav.route.totalM) + ' ridden.';
+  }
+  function updateNavStatus(){
+    var st = navEls.status;
+    if (nav.active && nav.route){
+      var via = nav.source === 'gpx' ? 'a saved GPX track' : nav.source === 'osrm' ? 'OSRM' : 'Valhalla';
+      st.innerHTML = '<strong>Navigating to ' + escXml(nav.destName) + '</strong> — via ' + via + ', route cached on this device. Guidance keeps working offline from the cache; re-routing needs signal.';
+      navEls.resumeBtn.hidden = true;
+      return;
+    }
+    var saved = loadNavRoute();
+    if (saved && saved.route){
+      st.textContent = 'Last route: ' + saved.destName + ' — cached on this device. Tap Resume route to guide again, no signal needed.';
+      navEls.resumeBtn.hidden = false;
+      navEls.resumeBtn.textContent = 'Resume route to ' + saved.destName;
+    } else {
+      st.textContent = 'No route yet. Type a place below and the speedo will guide you turn by turn, Beeline-style — one big arrow, the distance to the next turn, and the street name.';
+      navEls.resumeBtn.hidden = true;
+    }
+  }
+  function startGpxFollow(ride){
+    if (!ride || !ride.points || ride.points.length < 2) return;
+    var name = (ride.imported && ride.name) ? ride.name : rideName(ride);
+    var route = buildRouteFromRide(ride, name);
+    startNavigation(route, name, 'gpx');
+  }
+
+  /* ----- Destination search + route wiring ----- */
+  var destChoice = null;
+  var lastSearchT = 0;
+  function wireNav(){
+    navEls.destSearchBtn.addEventListener('click', function(){
+      var q = navEls.destInput.value.trim();
+      if (q.length < 3){
+        navEls.status.textContent = 'Type at least 3 characters — a street address or a place name.';
+        return;
+      }
+      var now = Date.now();
+      if (now - lastSearchT < 1000){ return; } // Nominatim asks for 1 request a second, max
+      lastSearchT = now;
+      navEls.destSearchBtn.disabled = true;
+      navEls.destSearchBtn.textContent = 'Searching…';
+      navEls.destResults.innerHTML = '';
+      navEls.destConfirm.hidden = true;
+      destChoice = null;
+      geocodePlace(q).then(function(results){
+        navEls.destSearchBtn.disabled = false;
+        navEls.destSearchBtn.textContent = 'Find place';
+        if (!results.length){
+          navEls.status.textContent = 'No places found for "' + q + '" — try a street address or a town name.';
+          return;
+        }
+        results.forEach(function(p){
+          var li = document.createElement('li');
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = p.name;
+          b.addEventListener('click', function(){
+            destChoice = p;
+            navEls.destResults.innerHTML = '';
+            navEls.destConfirmName.textContent = p.name;
+            navEls.destConfirmSub.textContent = p.lat.toFixed(5) + ', ' + p.lon.toFixed(5);
+            navEls.destConfirm.hidden = false;
+          });
+          li.appendChild(b);
+          navEls.destResults.appendChild(li);
+        });
+      }).catch(function(){
+        navEls.destSearchBtn.disabled = false;
+        navEls.destSearchBtn.textContent = 'Find place';
+        navEls.status.textContent = 'Place search failed — check signal and try again. Nominatim is a free public server; if it\'s down, try again in a bit.';
+      });
+    });
+    navEls.destInput.addEventListener('keydown', function(e){
+      if (e.key === 'Enter'){ e.preventDefault(); navEls.destSearchBtn.click(); }
+    });
+    navEls.destCancelBtn.addEventListener('click', function(){
+      destChoice = null;
+      navEls.destConfirm.hidden = true;
+    });
+    navEls.destRouteBtn.addEventListener('click', function(){
+      if (!destChoice) return;
+      if (!state.lastPos){
+        navEls.status.textContent = 'Need a GPS fix first — tap Start Ride, wait for the dot to go green, then route.';
+        return;
+      }
+      var from = { lat: state.lastPos.lat, lon: state.lastPos.lon };
+      var to = { lat: destChoice.lat, lon: destChoice.lon };
+      var name = destChoice.name;
+      navEls.destRouteBtn.disabled = true;
+      navEls.destRouteBtn.textContent = 'Fetching route…';
+      navEls.status.textContent = 'Fetching a route to ' + name + '…';
+      fetchRoute(from, to, name).then(function(res){
+        navEls.destRouteBtn.disabled = false;
+        navEls.destRouteBtn.textContent = 'Route here';
+        navEls.destConfirm.hidden = true;
+        startNavigation(res.route, name, res.source);
+        navEls.status.innerHTML = '<strong>Routing to ' + escXml(name) + '</strong> via ' + (res.source === 'osrm' ? 'OSRM' : 'Valhalla') + ' — route cached, guidance works offline from here.';
+      }).catch(function(){
+        navEls.destRouteBtn.disabled = false;
+        navEls.destRouteBtn.textContent = 'Route here';
+        navEls.status.textContent = 'Couldn\'t fetch a route — check signal and try again. Tried Valhalla, then OSRM; both are free public servers and either can be briefly down.';
+      });
+    });
+    navEls.resumeBtn.addEventListener('click', function(){
+      var saved = loadNavRoute();
+      if (!saved || !saved.route) return;
+      startNavigation(saved.route, saved.destName, saved.source);
+    });
+    navEls.rerouteBtn.addEventListener('click', function(){
+      if (!nav.active || !nav.route || !state.lastPos) return;
+      var from = { lat: state.lastPos.lat, lon: state.lastPos.lon };
+      var to = { lat: nav.route.points[nav.route.points.length - 1].lat, lon: nav.route.points[nav.route.points.length - 1].lon };
+      navEls.rerouteBtn.disabled = true;
+      navEls.rerouteBtn.textContent = 'Re-routing…';
+      fetchRoute(from, to, nav.destName).then(function(res){
+        navEls.rerouteBtn.disabled = false;
+        navEls.rerouteBtn.textContent = 'Re-route from here';
+        startNavigation(res.route, nav.destName, res.source);
+      }).catch(function(){
+        navEls.rerouteBtn.disabled = false;
+        navEls.rerouteBtn.textContent = 'Re-route from here';
+        navEls.status.textContent = 'No signal — couldn\'t re-route. Ride back toward the route line and guidance picks up on its own.';
+      });
+    });
+    navEls.endBtn.addEventListener('click', endNavigation);
+    function bindEndpointInput(input, key){
+      input.addEventListener('change', function(){
+        var ep = loadEndpoints();
+        var v = normalizeEndpoint(input.value, ep[key]);
+        ep[key] = v;
+        input.value = v;
+        saveEndpoints(ep);
+      });
+    }
+    bindEndpointInput(navEls.cfgValhalla, 'valhalla');
+    bindEndpointInput(navEls.cfgOsrm, 'osrm');
+    bindEndpointInput(navEls.cfgNominatim, 'nominatim');
+    navEls.cfgReset.addEventListener('click', function(){
+      saveEndpoints({ valhalla: ENDPOINT_DEFAULTS.valhalla, osrm: ENDPOINT_DEFAULTS.osrm, nominatim: ENDPOINT_DEFAULTS.nominatim });
+      refreshEndpointInputs();
+    });
+    refreshEndpointInputs();
+  }
+  function restoreNav(){
+    updateNavStatus();
+  }
+
+
   // Recover a ride left open by a closed tab or a dead phone, then show history
   (function(){
     var orphan = loadCurrent();
@@ -1585,6 +2301,8 @@
   if (els.versionLine) els.versionLine.textContent = 'GPS Speedometer v' + APP_VERSION + ' · Rides stay on this device — no account, no cloud.';
   window.addEventListener('pagehide', function(){ if (state.currentRide) saveCurrent(state.currentRide); });
   wireGpxImport();
+  wireNav();
+  restoreNav();
   renderRideList();
 
   boxes.forEach(placeBox);
