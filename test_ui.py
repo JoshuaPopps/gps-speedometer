@@ -412,7 +412,7 @@ def main():
         page.on("dialog", lambda d: d.accept())
         page.goto("http://127.0.0.1:%d/index.html" % port_stage)
         page.wait_for_timeout(1200)
-        check("version line shows v1.2.0", "v1.2.0" in page.locator("#versionLine").inner_text())
+        check("version line shows v1.2.1", "v1.2.1" in page.locator("#versionLine").inner_text())
         check("history starts empty", page.locator("#ridesEmpty").is_visible())
 
         page.click("#mainBtn")
