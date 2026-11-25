@@ -1,5 +1,34 @@
 # Testing — GPS Speedometer
 
+## Node tests for the lean-angle maths (`test.js`)
+
+The app is a single-file PWA with no Node test harness for the UI — but
+the lean-angle maths is pure functions, so `test.js` covers them in
+plain Node with a `check(name, cond)` pattern. It extracts the shipped
+functions (`wrapDeg`, `gravityFromOrientation`, `leanFromGravity`,
+`smoothLean`, `nextMaxLean`, `fmtLean`) straight out of `index.html` by
+name and evaluates them, so the test runs the code that ships, not a
+copy that could drift. It also cross-checks the gravity formula against
+a rotation matrix and round-trips real leans through
+`Rz(alpha) Rx(beta) Ry(gamma)` — a 30° roll reads back as 30.00°.
+
+The route-planning maths (v1.4.0) is covered the same way:
+`mergeLegRoutes` (multi-leg stitching — joint point deduped, maneuver
+positions and indices offset, intermediate arrive maneuvers become
+continues), `planFuelStops` (one stop every range-minus-margin miles,
+no stops without a usable range), and `fuelStopLabel` (nearest named
+waypoint or turn street at or before the stop, inside 15 miles) are
+extracted from `index.html` and tested on synthetic legs and routes.
+The file also asserts the Plan a route section and its library
+citations are in the shipped page, and that the service-worker cache
+is `gps-speedometer-v2`.
+
+Run (from this directory):
+
+```sh
+node test.js
+```
+
 ## Playwright UI tests (`test_ui.py`)
 
 The app is a single-file PWA with no Node test harness: the tests drive the
@@ -10,15 +39,15 @@ Chrome + a real ride are the test).
 Setup (once):
 
 ```sh
-python3 -m venv /tmp/pw-render
-/tmp/pw-render/bin/pip install playwright
-/tmp/pw-render/bin/playwright install chromium
+python3 -m venv /tmp/pw2
+/tmp/pw2/bin/pip install playwright
+/tmp/pw2/bin/playwright install chromium
 ```
 
 Run (from this directory):
 
 ```sh
-/tmp/pw-render/bin/python test_ui.py
+/tmp/pw2/bin/python test_ui.py
 ```
 
 What it covers:
@@ -54,6 +83,33 @@ What it covers:
      same arrow screen, fully offline.
    - Endpoint settings: pointing Valhalla at a custom URL sends the
      route request there; Reset restores the public defaults.
+10. Lean angle (fake `devicemotion` / `deviceorientation` events — the
+    VM has no motion sensor, and a real phone ride is still the test):
+    - Calibrate waits for the first sensor event, then the tile reads
+      live: upright 0°, a 30° right lean reads "30° R", a left lean
+      reads "° L" once smoothing catches up.
+    - Calibration survives a reload; Clear returns to uncalibrated.
+    - Orientation fallback: calibrated at beta=60, the (48.59, 40.89)
+      pair a real 30° lean produces reads back as "30° R".
+    - Permission denied shows "Motion permission denied"; no sensor
+      APIs at all shows "Not available on this device" — never a fake
+      reading either way.
+    - A ride with a 30° lean mid-ride saves "Lean 30°" in its history
+      row (max lean only counts while rolling, 5 mph+).
+11. Route planning (mocked Valhalla multi-leg + Nominatim — the
+    geocode mock answers "Stop Town" and "Test Place" with different
+    names so the legs can be told apart):
+    - Add a stop, then a destination: the stop lands in the stop list,
+      the destination line shows the place.
+    - Plan with 2 mi per tank and a 0.5 mi early margin on the ~4.5 mi
+      canned route: the summary shows the total (~4.5 mi), both legs
+      with the stop and destination named, and two fuel stops — the
+      first near the north leg's street, the second near the waypoint.
+    - Navigate this plan opens the same arrow screen on the merged
+      route.
+    - The plan restores from the on-device cache after a reload with
+      no new route request; Clear plan wipes the summary and the stop
+      list.
 
 The fake GPS is installed with `add_init_script` before page scripts run:
 it replaces `navigator.geolocation.watchPosition` with an emitter that

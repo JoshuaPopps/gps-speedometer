@@ -49,6 +49,7 @@
   button, [role="button"]{ min-height:44px; }
   .app{ max-width:680px; margin:0 auto; padding:14px 16px 22px; display:flex; flex-direction:column; min-height:100dvh; }
   .topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .topbar .pg-sw-update{ flex:none; min-height:38px; padding:8px 14px; border:1px solid var(--accent); border-radius:999px; background:var(--accent-dim); color:var(--accent-bright); font:600 13px/1.2 "Archivo Narrow",sans-serif; letter-spacing:.05em; text-transform:uppercase; cursor:pointer; }
   .gps-pill{
     display:inline-flex; align-items:center; gap:8px; background:var(--chip-bg);
     border:1px solid var(--chip-line); border-radius:999px; padding:8px 14px 8px 11px;
@@ -108,7 +109,8 @@
   .stat-value{ margin-top:6px; font-family:"Archivo Narrow",sans-serif; font-weight:700; font-size:28px; line-height:1; font-variant-numeric:tabular-nums; color:var(--ink); }
   .stat-value small{ font-size:13px; color:var(--muted); margin-left:3px; }
   .stat-sub{ margin-top:6px; font-size:13.5px; color:var(--muted); line-height:1.3; }
-  .secondary{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:12px; }
+  .secondary{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+  @media (min-width:520px){ .secondary{ grid-template-columns:repeat(4,1fr); } }
   .secondary .stat{ padding:10px 12px 9px; }
   .secondary .stat-value{ font-size:20px; }
   .controls{ margin-top:18px; }
@@ -305,6 +307,34 @@
     border-radius:6px; padding:11px 10px; font:500 14px/1.3 "Archivo Narrow",sans-serif;
     min-height:44px; margin:2px 0 10px;
   }
+  /* ---------- Route planning: waypoints, distance, fuel stops ---------- */
+  .plan-section{ margin-top:20px; }
+  .plan-stops{ list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .plan-stops li{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:11px 12px;
+    font-size:15.5px; font-weight:600; color:var(--ink);
+  }
+  .plan-stops li .plan-stop-kind{ color:var(--accent-bright); font-size:12px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; margin-right:8px; }
+  .plan-stops .ghost-btn{ flex:none; min-height:40px; padding:8px 12px; color:var(--signal); }
+  .plan-num{
+    width:100%; background:var(--panel-2); color:var(--ink); border:1px solid var(--line-strong);
+    border-radius:6px; padding:11px 10px; font:600 16px/1.2 "Archivo Narrow",sans-serif;
+    min-height:48px; max-width:120px; text-align:right;
+  }
+  .plan-summary{ margin-top:14px; background:var(--panel); border:1px solid var(--accent); border-radius:6px; padding:14px; }
+  .plan-summary[hidden]{ display:none; }
+  .plan-total{ font-size:19px; font-weight:700; color:var(--ink); line-height:1.35; }
+  .plan-total small{ font-size:14px; color:var(--muted); font-weight:500; }
+  .plan-legs{ list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; font-size:15px; color:var(--ink-soft); line-height:1.45; }
+  .plan-legs b{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  .plan-fuel{ margin-top:12px; border-top:1px solid var(--line); padding-top:12px; }
+  .plan-fuel-title{ font-weight:700; font-size:15px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-bright); }
+  .plan-fuel ul{ list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; font-size:15px; color:var(--ink-soft); line-height:1.45; }
+  .plan-fuel ul b{ color:var(--ink); font-variant-numeric:tabular-nums; }
+  .plan-fuel .ok{ color:var(--green); }
+  .plan-note{ margin-top:12px; font-size:13.5px; line-height:1.55; color:var(--muted); }
+  .plan-note b{ color:var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -384,6 +414,11 @@
       <div class="stat-label">GPS fixes</div>
       <div class="stat-value"><span id="fixValue">0</span></div>
     </div>
+    <div class="stat">
+      <div class="stat-label">Lean</div>
+      <div class="stat-value"><span id="leanValue">—</span></div>
+      <div class="stat-sub" id="leanSub">Checking sensor…</div>
+    </div>
   </div>
 
   <div class="controls">
@@ -448,6 +483,50 @@
       </div>
     </div>
     <p class="nav-attrib">Routes come from Valhalla or OSRM on &copy; OpenStreetMap contributors (ODbL) data; places from Nominatim. Only the route request itself — your position and the destination — goes to the server picked in Settings. No account, no identifier, no location history, no ride data ever leaves the phone. Point the servers at your own hardware in Settings and no third party is involved at all.</p>
+  </section>
+
+  <section class="plan-section" aria-label="Plan a route">
+    <div class="rides-head">
+      <div class="rides-title">Plan a route</div>
+      <button type="button" class="ghost-btn" id="planClearBtn" hidden>Clear plan</button>
+    </div>
+    <p class="nav-status" id="planStatus">Add stops between here and where you're headed, then plan the route — total distance, each leg, and where the fuel stops fall. The plan is saved on this device, so it survives a reload and works offline from the cache.</p>
+    <div class="nav-row">
+      <input type="text" class="nav-input" id="planStopInput" placeholder="Add a stop — a town or place name" autocomplete="off" enterkeyhint="search" aria-label="Add a stop">
+      <button type="button" class="ghost-btn" id="planStopSearchBtn" style="flex:none; padding:12px 16px;">Find place</button>
+    </div>
+    <ul class="nav-results" id="planStopResults"></ul>
+    <ul class="plan-stops" id="planStopList"></ul>
+    <div class="nav-row">
+      <input type="text" class="nav-input" id="planDestInput" placeholder="Destination — an address or place name" autocomplete="off" enterkeyhint="search" aria-label="Destination for the plan">
+      <button type="button" class="ghost-btn" id="planDestSearchBtn" style="flex:none; padding:12px 16px;">Find place</button>
+    </div>
+    <ul class="nav-results" id="planDestResults"></ul>
+    <p class="nav-status" id="planDestLine" hidden></p>
+
+    <div class="sect">Fuel stops</div>
+    <p class="install-note" style="border:0; padding-top:0; margin-top:6px;">Your miles per tank is yours to enter — the app never guesses a range for your bike. The planner puts a fuel stop that many miles in, minus the early margin, and repeats until the destination.</p>
+    <div class="prow">
+      <span>Miles per tank</span>
+      <span class="rng-wrap"><input type="number" class="plan-num" id="planRangeMi" inputmode="decimal" min="1" max="999" step="1" placeholder="e.g. 130" aria-label="Miles per tank"></span>
+    </div>
+    <div class="prow">
+      <span>Stop early by</span>
+      <span class="rng-wrap"><input type="number" class="plan-num" id="planMarginMi" inputmode="decimal" min="0" max="100" step="1" value="20" aria-label="Stop early by, miles"><span class="val">mi</span></span>
+    </div>
+    <div class="row-btns">
+      <button type="button" class="ghost-btn" id="planRouteBtn">Plan route</button>
+      <button type="button" class="ghost-btn" id="planNavBtn" hidden>Navigate this plan</button>
+    </div>
+    <div class="plan-summary" id="planSummary" hidden>
+      <div class="plan-total" id="planTotal"></div>
+      <ul class="plan-legs" id="planLegs"></ul>
+      <div class="plan-fuel" id="planFuel">
+        <div class="plan-fuel-title">Fuel stops</div>
+        <ul id="planFuelList"></ul>
+      </div>
+    </div>
+    <p class="plan-note" id="planNote"><b>Published tank sizes, from the garage library:</b> 1990 Softail FLSTC and 1995 Fat Boy FLSTF — <b>4.2 gal total, 0.75 gal reserve</b> (Clymer Softail 1984&ndash;1999, Table 4 — aftermarket, not factory). The factory 1997&ndash;98 Softail manual #99482-98 lists the same 4.2 gal total for all models except the FXSTC (5.2 gal). A 1998 Sportster XLH carries 3.30 gal total, 0.50 gal reserve (factory manual #99484-98, p. 190). Reserve is the petcock&rsquo;s up position (Softail 1997&ndash;98 manual, p. 234) — plan the stop before you need it, because reserve is under a gallon.</p>
   </section>
 
   <section class="rides" aria-label="Ride history">
@@ -525,6 +604,21 @@
     <div class="prow" id="rowLabelSize">
       <span>Max / heading size</span>
       <span class="rng-wrap"><input type="range" id="rngLabelSize" min="100" max="300" step="25" value="100" aria-label="Max and heading size percent"><span class="val" id="valLabelSize">100%</span></span>
+    </div>
+
+    <div class="sect">Lean angle</div>
+    <p class="install-note" style="border:0; padding-top:0; margin-top:6px;">Lean only means something if the phone stays fixed in one spot on the bike — same mount, same angle, every ride. Calibrate with the bike straight up and the phone in its riding position. If the phone moves in the mount, calibrate again — otherwise the reading is nonsense.</p>
+    <div class="prow">
+      <span>Sensor</span>
+      <span class="val" id="leanSensorState">Checking…</span>
+    </div>
+    <div class="prow">
+      <span>Max lean this ride</span>
+      <span class="val" id="leanMaxPanel">—</span>
+    </div>
+    <div class="row-btns">
+      <button type="button" class="ghost-btn" id="leanCalBtn">Calibrate upright</button>
+      <button type="button" class="ghost-btn" id="leanResetBtn">Clear calibration</button>
     </div>
 
     <div class="sect">Routing</div>
@@ -616,6 +710,7 @@
   </div>
 </div>
 
+<script src="sw-update.js"></script>
 <script>
 (function(){
   "use strict";
@@ -629,6 +724,9 @@
     time: $('timeValue'), timeSub: $('timeSub'),
     alt: $('altValue'), altUnit: $('altUnit'),
     headingValue: $('headingValue'), fixes: $('fixValue'),
+    leanValue: $('leanValue'), leanSub: $('leanSub'),
+    leanSensorState: $('leanSensorState'), leanMaxPanel: $('leanMaxPanel'),
+    leanCalBtn: $('leanCalBtn'), leanResetBtn: $('leanResetBtn'),
     mainBtn: $('mainBtn'), wakeBtn: $('wakeBtn'), resetBtn: $('resetBtn'),
     warn: $('noticeWarn'), err: $('noticeError'), info: $('noticeInfo'),
     stage: $('stage'),
@@ -737,7 +835,7 @@
      A ride is one Start → Stop session. A tap that goes nowhere
      (under 5 track points and under 50 m) is not saved. If the tab
      closes mid-ride, the in-progress ride is recovered on next load. */
-  var APP_VERSION = '1.2.1';
+  var APP_VERSION = '1.4.0';
   var RIDES_KEY = 'gpsSpeedo.rides.v1';
   var CURRENT_KEY = 'gpsSpeedo.current.v1';
   var MAX_RIDES = 30;
@@ -820,6 +918,7 @@
     saveCurrent(null);
     if (cur && cur.points){
       finalizeRide(cur, Date.now());
+      cur.maxLeanDeg = Math.round(lean.max);
       if (cur.points.length >= REC_MIN_POINTS || cur.distanceM >= REC_MIN_DIST_M){
         var rides = loadRides();
         rides.unshift(cur);
@@ -925,6 +1024,8 @@
       return b;
     }
     var distB = stat('Distance'), durB = stat('Time'), topB = stat('Top'), avgB = stat('Avg'), gainB = stat('Climb');
+    var leanB = null;
+    if (isCurrent || (ride.maxLeanDeg && ride.maxLeanDeg > 0)) leanB = stat('Lean');
     li.appendChild(stats);
     if (!isCurrent){
       var actions = document.createElement('div'); actions.className = 'ride-actions';
@@ -945,7 +1046,7 @@
       li.appendChild(actions);
     }
     if (isCurrent){
-      currentRowEls = { dist: distB, dur: durB, top: topB, avg: avgB, gain: gainB };
+      currentRowEls = { dist: distB, dur: durB, top: topB, avg: avgB, gain: gainB, lean: leanB };
       updateCurrentRideRow();
     } else {
       distB.textContent = fmtDist(ride.distanceM);
@@ -953,6 +1054,7 @@
       topB.textContent = fmtSpeed(ride.maxMs);
       avgB.textContent = fmtSpeed(ride.durationMs > 0 ? ride.distanceM / (ride.durationMs / 1000) : 0);
       gainB.textContent = fmtGain(ride.gainM);
+      if (leanB) leanB.textContent = fmtLean(ride.maxLeanDeg);
     }
     return li;
   }
@@ -976,6 +1078,10 @@
     var durS = Math.max(1, (Date.now() - ride.start) / 1000);
     currentRowEls.avg.textContent = fmtSpeed(st.distanceM / durS);
     currentRowEls.gain.textContent = fmtGain(st.gainM);
+    if (currentRowEls.lean){
+      currentRowEls.lean.textContent = fmtLean(lean.max);
+      currentRowEls.lean.parentNode.style.display = lean.max > 0 ? '' : 'none';
+    }
   }
   function wireGpxImport(){
     if (!els.importGpxBtn || !els.importGpxFile) return;
@@ -1184,6 +1290,7 @@
       : '—';
     els.resetBtn.disabled = !(state.totalMeters > 0 || elapsed > 0 || state.maxMs > 0);
     els.panelRideBtn.textContent = state.tracking ? 'Stop ride' : (state.paused && elapsed > 0 ? 'Resume ride' : 'Start ride');
+    renderLean();
     updateCurrentRideRow();
     renderNav();
   }
@@ -1319,6 +1426,7 @@
     }
     if (!state.currentRide){
       state.currentRide = newRide();
+      lean.max = 0; lean.smooth = null;
       saveCurrent(state.currentRide);
       renderRideList();
     }
@@ -1347,11 +1455,248 @@
     state.segmentStart = state.tracking ? Date.now() : null;
     state.startStamp = state.tracking ? Date.now() : null;
     state.fixes = 0;
+    lean.max = 0; lean.smooth = null;
     state.currentRide = null; saveCurrent(null); renderRideList();
     showNotice('', '');
     if (!state.tracking) setGpsStatus('', 'GPS off — tap Start for a fix');
     render();
   });
+
+  /* ---------- Lean angle ----------
+     How it works: the phone's motion sensor reports the gravity vector
+     (DeviceMotionEvent.accelerationIncludingGravity). Lean is the signed
+     angle between the live gravity vector and the one captured at
+     calibration (bike straight up, phone in its riding position),
+     projected onto the screen plane. Positive = leaning right.
+     DeviceOrientationEvent beta/gamma is the fallback for phones that
+     fire orientation but not motion events: the same gravity vector is
+     derived from beta/gamma, so both paths share one maths core.
+     The phone has to stay fixed in one spot on the bike — same mount,
+     same angle — or the reading is nonsense. That is why calibration
+     exists, and why the sensor states below never fake a reading:
+     no sensor, denied permission, or no calibration all show as such.
+     Max lean only counts while rolling (5 mph+) so wiggling the bars
+     parked does not set a record. Ride-unverified on a real phone. */
+  function wrapDeg(d){
+    d = d % 360;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return d;
+  }
+  function gravityFromOrientation(betaDeg, gammaDeg){
+    // Gravity in device coords from beta/gamma. From R = Rz(alpha)
+    // Rx(beta) Ry(gamma): gravity is -g times the third row of R, and
+    // that row does not involve alpha, so compass heading cannot skew it.
+    var b = betaDeg * Math.PI / 180, g = gammaDeg * Math.PI / 180;
+    return { x: Math.cos(b) * Math.sin(g), y: -Math.sin(b), z: -Math.cos(b) * Math.cos(g) };
+  }
+  function leanFromGravity(g, ref){
+    // Signed lean in degrees between two gravity vectors, projected
+    // onto the screen plane (device xy). Null when the projection is
+    // too small to trust — phone near-flat, or tipped right over.
+    var px = g.x, py = g.y, rx = ref.x, ry = ref.y;
+    var pm = Math.sqrt(px * px + py * py), rm = Math.sqrt(rx * rx + ry * ry);
+    if (pm < 0.25 || rm < 0.25) return null;
+    var cross = rx * py - ry * px;
+    var dot = rx * px + ry * py;
+    return Math.atan2(cross, dot) * 180 / Math.PI;
+  }
+  function smoothLean(prev, next, k){
+    if (next == null) return prev;
+    if (prev == null) return next;
+    return prev + (next - prev) * k;
+  }
+  function nextMaxLean(max, leanDeg, speedKmh){
+    // Max lean only counts while rolling, 8 km/h is about 5 mph.
+    if (leanDeg == null || speedKmh < 8) return max;
+    var a = Math.abs(leanDeg);
+    return a > max ? a : max;
+  }
+  function fmtLean(deg){
+    if (deg == null) return '—';
+    var a = Math.abs(Math.round(deg));
+    if (a === 0) return '0°';
+    return a + '° ' + (deg > 0 ? 'R' : 'L');
+  }
+
+  var LEAN_REF_KEY = 'gpsSpeedo.leanRef.v1';
+  var LEAN_SMOOTH_K = 0.35;   // exponential smoothing per sensor event
+  var LEAN_DEADBAND_DEG = 2;  // under this reads as upright
+  var LEAN_MIN_PROJ = 0.25;   // see leanFromGravity
+  var lean = {
+    status: 'checking', // checking | live | uncalibrated | flat | unsupported | denied | waiting
+    ref: null,          // {x, y, z} gravity at calibration, or null
+    lastG: null,        // most recent gravity vector
+    smooth: null,       // smoothed lean in degrees
+    max: 0,             // max |lean| this ride, degrees
+    calPending: false,  // a Calibrate tap is waiting on the next sensor event
+    denied: false,
+    listenersOn: false,
+    noEventTimer: null,
+    lastRenderT: 0
+  };
+  function loadLeanRef(){
+    try {
+      var raw = localStorage.getItem(LEAN_REF_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (o && isFinite(o.x) && isFinite(o.y) && isFinite(o.z)) return { x: o.x, y: o.y, z: o.z };
+    } catch (e){}
+    return null;
+  }
+  function saveLeanRef(ref){
+    try {
+      if (ref) localStorage.setItem(LEAN_REF_KEY, JSON.stringify(ref));
+      else localStorage.removeItem(LEAN_REF_KEY);
+    } catch (e){}
+  }
+  function leanSensorText(){
+    switch (lean.status){
+      case 'live': return 'Live';
+      case 'uncalibrated': return 'Not calibrated';
+      case 'flat': return 'Mount the phone upright';
+      case 'unsupported': return 'Not available on this device';
+      case 'denied': return 'Motion permission denied';
+      case 'waiting': return 'Waiting for sensor…';
+      default: return 'Checking…';
+    }
+  }
+  function renderLean(){
+    if (!els.leanValue) return;
+    if (lean.status === 'live' && lean.smooth != null){
+      els.leanValue.textContent = fmtLean(Math.abs(lean.smooth) < LEAN_DEADBAND_DEG ? 0 : lean.smooth);
+      els.leanSub.textContent = lean.max > 0 ? 'Max ' + fmtLean(lean.max) + ' this ride' : 'Max — this ride';
+    } else {
+      els.leanValue.textContent = '—';
+      if (lean.status === 'unsupported') els.leanSub.textContent = 'Not available on this device';
+      else if (lean.status === 'denied') els.leanSub.textContent = 'Motion permission denied';
+      else if (lean.status === 'uncalibrated') els.leanSub.textContent = 'Calibrate in Settings';
+      else if (lean.status === 'flat') els.leanSub.textContent = 'Mount the phone upright';
+      else if (lean.status === 'waiting') els.leanSub.textContent = 'Waiting for sensor…';
+      else els.leanSub.textContent = 'Checking sensor…';
+    }
+    if (els.leanSensorState) els.leanSensorState.textContent = leanSensorText();
+    if (els.leanMaxPanel) els.leanMaxPanel.textContent = lean.max > 0 ? fmtLean(lean.max) : '—';
+  }
+  function captureLeanRef(g){
+    lean.ref = { x: g.x, y: g.y, z: g.z };
+    saveLeanRef(lean.ref);
+    // The captured sample IS the upright pose, so lean is 0 right now.
+    lean.smooth = 0;
+    lean.status = 'live';
+    renderLean();
+  }
+  function leanOnGravity(g){
+    lean.lastG = g;
+    if (lean.calPending){
+      lean.calPending = false;
+      captureLeanRef(g);
+      return;
+    }
+    if (!lean.ref){ lean.status = 'uncalibrated'; leanThrottledRender(); return; }
+    var l = leanFromGravity(g, lean.ref);
+    if (l == null){ lean.status = 'flat'; leanThrottledRender(); return; }
+    lean.smooth = smoothLean(lean.smooth, l, LEAN_SMOOTH_K);
+    var shown = Math.abs(lean.smooth) < LEAN_DEADBAND_DEG ? 0 : lean.smooth;
+    lean.max = nextMaxLean(lean.max, shown, state.smoothKmh);
+    lean.status = 'live';
+    leanThrottledRender();
+  }
+  function leanThrottledRender(){
+    // Motion events fire dozens of times a second; the tile only needs
+    // a refresh a few times a second. State is always current.
+    var now = Date.now();
+    if (now - lean.lastRenderT < 200) return;
+    lean.lastRenderT = now;
+    renderLean();
+  }
+  function onLeanMotion(e){
+    var acc = e.accelerationIncludingGravity;
+    if (acc && acc.x != null && acc.y != null && acc.z != null){
+      leanOnGravity({ x: acc.x, y: acc.y, z: acc.z });
+    }
+  }
+  function onLeanOrient(e){
+    if (e.beta == null || e.gamma == null) return;
+    leanOnGravity(gravityFromOrientation(e.beta, e.gamma));
+  }
+  function enableLean(){
+    if (lean.listenersOn) return;
+    var motion = typeof DeviceMotionEvent !== 'undefined';
+    var orient = typeof DeviceOrientationEvent !== 'undefined';
+    if (!motion && !orient){
+      lean.status = 'unsupported';
+      renderLean();
+      return;
+    }
+    lean.listenersOn = true;
+    if (motion) window.addEventListener('devicemotion', onLeanMotion);
+    if (orient) window.addEventListener('deviceorientation', onLeanOrient);
+    // A desktop browser has the constructors but never fires an event.
+    // If nothing arrives, say so instead of sitting on "Checking…" for
+    // the whole ride. Any late event still flips the state back.
+    lean.noEventTimer = setTimeout(function(){
+      if (!lean.lastG && lean.status === 'checking'){
+        lean.status = 'unsupported';
+        renderLean();
+      }
+    }, 6000);
+  }
+  function calibrateLean(){
+    // iOS needs the motion permission, and it must be asked from a tap.
+    // Android and desktop have no such prompt. But desktop Chrome now
+    // exposes requestPermission too, and it answers "denied" there even
+    // though motion events flow freely — so the permission answer must
+    // never block calibration on its own. Arm first, ask in parallel,
+    // and only surface a denial when no sensor event has ever arrived.
+    function arm(){
+      lean.denied = false;
+      if (lean.lastG){ captureLeanRef(lean.lastG); }
+      else {
+        lean.calPending = true;
+        lean.status = 'waiting';
+        renderLean();
+      }
+      resetPanelTimer();
+    }
+    function markDenied(){
+      if (!lean.lastG){
+        lean.denied = true;
+        lean.status = 'denied';
+        renderLean();
+      }
+    }
+    arm();
+    try {
+      var req = null;
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+        req = DeviceMotionEvent.requestPermission();
+      } else if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+        req = DeviceOrientationEvent.requestPermission();
+      }
+      if (req && typeof req.then === 'function'){
+        req.then(function(s){
+          if (s !== 'granted') setTimeout(markDenied, 1500);
+        }).catch(function(){ setTimeout(markDenied, 1500); });
+      }
+    } catch (e){}
+  }
+  function wireLean(){
+    lean.ref = loadLeanRef();
+    if (lean.ref) lean.status = 'checking';
+    if (els.leanCalBtn) els.leanCalBtn.addEventListener('click', calibrateLean);
+    if (els.leanResetBtn) els.leanResetBtn.addEventListener('click', function(){
+      lean.ref = null;
+      saveLeanRef(null);
+      lean.smooth = null;
+      lean.calPending = false;
+      lean.status = lean.lastG ? 'uncalibrated' : 'checking';
+      renderLean();
+      resetPanelTimer();
+    });
+    enableLean();
+    renderLean();
+  }
 
   /* ---------- Wake lock ---------- */
   function requestWake(){
@@ -1895,6 +2240,71 @@
     if (!last || last.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
     return { source: 'osrm', destName: destName, points: points, cum: cum, maneuvers: mans, totalM: route.distance || cum[cum.length - 1], totalS: route.duration || 0, fetchedAt: Date.now() };
   }
+
+  /* ----- Multi-leg normalisation: one internal shape, legs kept for the plan ----- */
+  function valhallaLegRoute(leg){
+    var points = decodePolyline(leg.shape, 6);
+    if (points.length < 2) throw new Error('route too short');
+    var cum = routeCumDist(points);
+    var mans = (leg.maneuvers || []).map(function(m){
+      var idx = Math.min(m.begin_shape_index || 0, points.length - 1);
+      return { kind: valhallaKind(m.type), street: (m.street_names && m.street_names[0]) || '', atM: cum[idx], atIdx: idx };
+    });
+    var last = mans[mans.length - 1];
+    if (!last || last.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
+    var totalM = (leg.summary && leg.summary.length) ? leg.summary.length * 1609.344 : cum[cum.length - 1];
+    return { points: points, cum: cum, maneuvers: mans, totalM: totalM, totalS: (leg.summary && leg.summary.time) || 0 };
+  }
+  function osrmLegRoute(leg){
+    var points = [], mans = [];
+    (leg.steps || []).forEach(function(st){
+      var coords = (st.geometry && st.geometry.coordinates) || [];
+      var stepStartIdx = points.length;
+      coords.forEach(function(c, ci){
+        if (points.length && ci === 0){ stepStartIdx = points.length - 1; return; }
+        points.push({ lat: c[1], lon: c[0] });
+      });
+      stepStartIdx = Math.min(stepStartIdx, points.length - 1);
+      mans.push({ kind: osrmKind(st.maneuver), street: st.name || '', atM: 0, atIdx: stepStartIdx });
+    });
+    if (points.length < 2) throw new Error('route too short');
+    var cum = routeCumDist(points);
+    mans.forEach(function(m){ m.atM = cum[m.atIdx]; });
+    var last = mans[mans.length - 1];
+    if (!last || last.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: cum[cum.length - 1], atIdx: points.length - 1 });
+    return { points: points, cum: cum, maneuvers: mans, totalM: leg.distance || cum[cum.length - 1], totalS: leg.duration || 0 };
+  }
+  function finishMultiRoute(merged, destName, source, stopNames, legRoutes, totalM, totalS){
+    merged.source = source;
+    merged.destName = destName;
+    merged.fetchedAt = Date.now();
+    merged.totalM = totalM || merged.totalM;
+    merged.totalS = totalS || merged.totalS;
+    merged.legs = legRoutes.map(function(l, i){
+      return { name: stopNames[i + 1], distM: l.totalM, durS: l.totalS };
+    });
+    merged.waypoints = stopNames.slice(1, -1).map(function(name, i){
+      return { name: name, atM: merged.boundaries[i] || 0 };
+    });
+    return merged;
+  }
+  function normalizeValhallaMulti(data, destName, stopNames){
+    if (!data || !data.trip || !data.trip.legs || !data.trip.legs.length) throw new Error('bad valhalla response');
+    var legRoutes = data.trip.legs.map(valhallaLegRoute);
+    var merged = mergeLegRoutes(legRoutes);
+    var totalM = (data.trip.summary && data.trip.summary.length) ? data.trip.summary.length * 1609.344 : 0;
+    var totalS = (data.trip.summary && data.trip.summary.time) || 0;
+    return finishMultiRoute(merged, destName, 'valhalla', stopNames, legRoutes, totalM, totalS);
+  }
+  function normalizeOsrmMulti(data, destName, stopNames){
+    if (!data || data.code !== 'Ok' || !data.routes || !data.routes.length) throw new Error('bad osrm response');
+    var route = data.routes[0];
+    var legs = (route.legs && route.legs.length) ? route.legs : [];
+    if (!legs.length) throw new Error('no osrm legs');
+    var legRoutes = legs.map(osrmLegRoute);
+    var merged = mergeLegRoutes(legRoutes);
+    return finishMultiRoute(merged, destName, 'osrm', stopNames, legRoutes, route.distance || 0, route.duration || 0);
+  }
   function maneuversFromTrack(points, cum){
     // A GPX track has no turn instructions — read the turns out of the
     // geometry: a sustained bearing change of 35° or more is a turn.
@@ -1917,6 +2327,81 @@
     var totalM = cum[cum.length - 1];
     var totalS = ride.durationMs ? ride.durationMs / 1000 : totalM / 8;
     return { source: 'gpx', destName: name, points: points, cum: cum, maneuvers: maneuversFromTrack(points, cum), totalM: totalM, totalS: totalS, fetchedAt: Date.now() };
+  }
+
+  /* ----- Route planning: multi-leg merge + fuel stops (pure) -----
+     A planned route is several legs (here → stop 1 → stop 2 → … →
+     destination) stitched into one route shape, so the existing
+     turn-by-turn guidance can follow it unchanged. Fuel stops are
+     pure distance math on the rider's own miles-per-tank — the app
+     never guesses a range for any bike. */
+  function mergeLegRoutes(legs){
+    // Stitch per-leg routes into one. The joint point (end of one leg =
+    // start of the next) is kept once; maneuver positions are offset
+    // onto the combined line. An intermediate leg's arrive maneuver
+    // becomes a plain continue — only the last leg actually arrives.
+    // Returns the merged route plus `boundaries`: the along-route
+    // distance of each leg joint, so waypoints can be named by position.
+    var points = [], cum = [], mans = [], boundaries = [];
+    var totalS = 0, used = 0;
+    legs.forEach(function(leg, li){
+      if (!leg || !leg.points || leg.points.length < 2) return;
+      var basePts = points.length;
+      var baseM = cum.length ? cum[cum.length - 1] : 0;
+      var startIdx = 0;
+      if (points.length){
+        var last = points[points.length - 1], first = leg.points[0];
+        if (haversine(last.lat, last.lon, first.lat, first.lon) < 0.5) startIdx = 1;
+      }
+      for (var i = startIdx; i < leg.points.length; i++){
+        points.push(leg.points[i]);
+        cum.push(baseM + leg.cum[i]);
+      }
+      var isLast = li === legs.length - 1;
+      (leg.maneuvers || []).forEach(function(m, mi){
+        if (basePts > 0 && mi === 0) return; // drop a later leg's depart
+        var kind = m.kind;
+        if (!isLast && kind === 'arrive') kind = 'straight';
+        mans.push({ kind: kind, street: m.street || '', atM: baseM + m.atM, atIdx: basePts + m.atIdx - startIdx });
+      });
+      totalS += leg.totalS || 0;
+      used++;
+      if (!isLast) boundaries.push(cum.length ? cum[cum.length - 1] : baseM);
+    });
+    if (points.length < 2) throw new Error('route too short');
+    var totalM = cum[cum.length - 1];
+    var lastMan = mans[mans.length - 1];
+    if (!lastMan || lastMan.kind !== 'arrive') mans.push({ kind: 'arrive', street: '', atM: totalM, atIdx: points.length - 1 });
+    return { points: points, cum: cum, maneuvers: mans, totalM: totalM, totalS: totalS, boundaries: boundaries, legsUsed: used };
+  }
+  function planFuelStops(totalM, rangeMi, marginMi){
+    // Distances (metres along the route) where a fuel stop falls: one
+    // every (range − margin) miles, so the stop lands before the tank
+    // runs dry. No usable range — or a margin that eats the whole
+    // range — means no stops to plan.
+    var range = parseFloat(rangeMi), margin = parseFloat(marginMi);
+    if (!isFinite(range) || range <= 0) return [];
+    if (!isFinite(margin) || margin < 0) margin = 0;
+    var intervalMi = range - margin;
+    if (intervalMi <= 0) return [];
+    var intervalM = intervalMi * 1609.344;
+    var stops = [], d = intervalM;
+    while (d < totalM){ stops.push(Math.round(d)); d += intervalM; }
+    return stops;
+  }
+  function fuelStopLabel(route, stopM){
+    // Name the nearest named point at or before this distance along the
+    // route — a waypoint first, else a turn street. Only within 15
+    // miles back; further than that the name is no help to a rider.
+    var WINDOW_M = 15 * 1609.344;
+    var best = null;
+    function consider(atM, name){
+      if (!name || atM == null || atM > stopM || stopM - atM > WINDOW_M) return;
+      if (!best || atM > best.atM) best = { atM: atM, name: name };
+    }
+    (route.waypoints || []).forEach(function(w){ consider(w.atM, w.name); });
+    (route.maneuvers || []).forEach(function(m){ consider(m.atM, m.street); });
+    return best ? best.name : null;
   }
 
   /* ----- Network: geocode + route fetch (public servers by default) ----- */
@@ -1973,6 +2458,41 @@
       .then(function(route){ return { route: route, source: 'valhalla' }; })
       .catch(function(){
         return fetchRouteOsrm(from, to, destName)
+          .then(function(route){ return { route: route, source: 'osrm' }; });
+      });
+  }
+  function fetchPlanRouteValhalla(from, stops, to, destName, stopNames){
+    var ep = loadEndpoints();
+    var locations = [{ lat: from.lat, lon: from.lon }]
+      .concat(stops.map(function(s){ return { lat: s.lat, lon: s.lon }; }))
+      .concat([{ lat: to.lat, lon: to.lon }]);
+    return fetchWithTimeout(ep.valhalla, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: locations,
+        costing: 'motorcycle',
+        directions_options: { units: 'miles' }
+      })
+    }).then(function(r){
+      if (!r.ok) throw new Error('valhalla ' + r.status);
+      return r.json();
+    }).then(function(d){ return normalizeValhallaMulti(d, destName, stopNames); });
+  }
+  function fetchPlanRouteOsrm(from, stops, to, destName, stopNames){
+    var ep = loadEndpoints();
+    var all = [from].concat(stops).concat([to]);
+    var path = all.map(function(p){ return p.lon + ',' + p.lat; }).join(';');
+    var url = ep.osrm + '/' + path + '?steps=true&overview=full&geometries=geojson';
+    return fetchWithTimeout(url, {}, 20000)
+      .then(function(r){ if (!r.ok) throw new Error('osrm ' + r.status); return r.json(); })
+      .then(function(d){ return normalizeOsrmMulti(d, destName, stopNames); });
+  }
+  function fetchPlanRoute(from, stops, to, destName, stopNames){
+    return fetchPlanRouteValhalla(from, stops, to, destName, stopNames)
+      .then(function(route){ return { route: route, source: 'valhalla' }; })
+      .catch(function(){
+        return fetchPlanRouteOsrm(from, stops, to, destName, stopNames)
           .then(function(route){ return { route: route, source: 'osrm' }; });
       });
   }
@@ -2287,6 +2807,270 @@
     updateNavStatus();
   }
 
+  /* ---------- Route planning: waypoints, distance, fuel stops ----------
+     The route half of the old route+fuel planner. Waypoints + destination
+     are geocoded with Nominatim, the multi-leg route comes from Valhalla
+     (motorcycle) with OSRM as fallback, and the whole plan — stops,
+     destination, range, and the fetched route — is cached on-device, so
+     the summary survives a reload and works offline. Fuel logging is
+     NOT here: that is the Dec 2 standalone push. This is planning only:
+     where the stops fall on the route, from the rider's own miles per
+     tank. Tank sizes in the note below are published figures from the
+     garage library, cited — the app never hardcodes a tank or a range. */
+  var PLAN_KEY = 'gpsSpeedo.plan.v1';
+  var PLAN_MAX_STOPS = 8;
+  var plan = { stops: [], dest: null, rangeMi: '', marginMi: 20, route: null, source: '', destName: '' };
+  var planEls = {
+    status: $('planStatus'), stopInput: $('planStopInput'), stopSearchBtn: $('planStopSearchBtn'),
+    stopResults: $('planStopResults'), stopList: $('planStopList'),
+    destInput: $('planDestInput'), destSearchBtn: $('planDestSearchBtn'),
+    destResults: $('planDestResults'), destLine: $('planDestLine'),
+    rangeMi: $('planRangeMi'), marginMi: $('planMarginMi'),
+    routeBtn: $('planRouteBtn'), navBtn: $('planNavBtn'), clearBtn: $('planClearBtn'),
+    summary: $('planSummary'), total: $('planTotal'), legs: $('planLegs'),
+    fuelList: $('planFuelList')
+  };
+  var lastPlanSearchT = 0;
+
+  function savePlan(){
+    try {
+      localStorage.setItem(PLAN_KEY, JSON.stringify({
+        stops: plan.stops, dest: plan.dest, rangeMi: plan.rangeMi, marginMi: plan.marginMi,
+        route: plan.route, source: plan.source, destName: plan.destName, savedAt: Date.now()
+      }));
+    } catch (e){}
+  }
+  function loadPlan(){
+    try {
+      var raw = localStorage.getItem(PLAN_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (!o || !Array.isArray(o.stops)) return null;
+      return o;
+    } catch (e){ return null; }
+  }
+  function planStopNames(){
+    var names = ['Here'];
+    plan.stops.forEach(function(s){ names.push(s.name); });
+    names.push(plan.dest ? plan.dest.name : 'Destination');
+    return names;
+  }
+  function renderPlanStops(){
+    var list = planEls.stopList;
+    list.innerHTML = '';
+    plan.stops.forEach(function(s, i){
+      var li = document.createElement('li');
+      var label = document.createElement('span');
+      var kind = document.createElement('span');
+      kind.className = 'plan-stop-kind';
+      kind.textContent = 'Stop ' + (i + 1);
+      label.appendChild(kind);
+      label.appendChild(document.createTextNode(s.name));
+      li.appendChild(label);
+      var rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'ghost-btn'; rm.textContent = 'Remove';
+      rm.setAttribute('aria-label', 'Remove stop ' + s.name);
+      rm.addEventListener('click', function(){
+        plan.stops.splice(i, 1);
+        plan.route = null; // stops changed — the fetched route is stale
+        savePlan(); renderPlanStops(); renderPlanSummary();
+      });
+      li.appendChild(rm);
+      list.appendChild(li);
+    });
+    if (plan.dest){
+      planEls.destLine.hidden = false;
+      planEls.destLine.textContent = 'Destination: ' + plan.dest.name;
+    } else {
+      planEls.destLine.hidden = true;
+    }
+    planEls.clearBtn.hidden = !(plan.stops.length || plan.dest || plan.route);
+  }
+  function renderPlanSummary(){
+    var hasRoute = !!(plan.route && plan.route.points && plan.route.points.length >= 2);
+    planEls.summary.hidden = !hasRoute;
+    planEls.navBtn.hidden = !hasRoute;
+    if (!hasRoute) return;
+    var route = plan.route;
+    var rideTime = route.totalS > 0 ? formatTime(route.totalS * 1000) : '';
+    planEls.total.innerHTML = '';
+    var totalB = document.createElement('b');
+    totalB.textContent = fmtDist(route.totalM);
+    planEls.total.appendChild(document.createTextNode('Total '));
+    planEls.total.appendChild(totalB);
+    if (rideTime) planEls.total.appendChild(document.createTextNode(' · about ' + rideTime + ' riding'));
+    var small = document.createElement('small');
+    small.textContent = ' via ' + (plan.source === 'osrm' ? 'OSRM' : 'Valhalla') + ' · cached on this device';
+    planEls.total.appendChild(document.createElement('br'));
+    planEls.total.appendChild(small);
+    var legsEl = planEls.legs;
+    legsEl.innerHTML = '';
+    var names = planStopNames();
+    (route.legs || []).forEach(function(leg, i){
+      var li = document.createElement('li');
+      var fromName = names[i] || 'Here', toName = leg.name || names[i + 1] || 'Destination';
+      var b = document.createElement('b');
+      b.textContent = fmtDist(leg.distM);
+      li.appendChild(document.createTextNode(fromName + ' → ' + toName + ': '));
+      li.appendChild(b);
+      if (leg.durS > 0) li.appendChild(document.createTextNode(' · ' + formatTime(leg.durS * 1000)));
+      legsEl.appendChild(li);
+    });
+    var fuelEl = planEls.fuelList;
+    fuelEl.innerHTML = '';
+    var range = parseFloat(plan.rangeMi);
+    if (!isFinite(range) || range <= 0){
+      var li0 = document.createElement('li');
+      li0.textContent = 'Enter your miles per tank above to see where fuel stops fall on this route.';
+      fuelEl.appendChild(li0);
+      return;
+    }
+    var stops = planFuelStops(route.totalM, plan.rangeMi, plan.marginMi);
+    if (!stops.length){
+      var liOk = document.createElement('li');
+      var ok = document.createElement('span');
+      ok.className = 'ok';
+      ok.textContent = 'One tank covers it';
+      liOk.appendChild(ok);
+      liOk.appendChild(document.createTextNode(' — ' + fmtDist(route.totalM) + ' total, your range is ' + Math.round(range) + ' mi.'));
+      fuelEl.appendChild(liOk);
+      return;
+    }
+    stops.forEach(function(stopM, i){
+      var li = document.createElement('li');
+      var b = document.createElement('b');
+      b.textContent = 'Fuel stop ' + (i + 1) + ' — about ' + fmtDist(stopM) + ' in';
+      li.appendChild(b);
+      var label = fuelStopLabel(route, stopM);
+      li.appendChild(document.createTextNode(label ? ', near ' + label + '.' : ' along the route.'));
+      fuelEl.appendChild(li);
+    });
+  }
+  function wirePlanSearch(inputEl, searchBtn, resultsEl, onPick){
+    function doSearch(){
+      var q = inputEl.value.trim();
+      if (q.length < 3){
+        planEls.status.textContent = 'Type at least 3 characters — a street address or a place name.';
+        return;
+      }
+      var now = Date.now();
+      if (now - lastPlanSearchT < 1000) return; // Nominatim asks for 1 request a second, max
+      lastPlanSearchT = now;
+      searchBtn.disabled = true;
+      searchBtn.textContent = 'Searching…';
+      resultsEl.innerHTML = '';
+      geocodePlace(q).then(function(results){
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Find place';
+        if (!results.length){
+          planEls.status.textContent = 'No places found for "' + q + '" — try a street address or a town name.';
+          return;
+        }
+        results.forEach(function(p){
+          var li = document.createElement('li');
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = p.name;
+          b.addEventListener('click', function(){
+            resultsEl.innerHTML = '';
+            inputEl.value = '';
+            onPick(p);
+          });
+          li.appendChild(b);
+          resultsEl.appendChild(li);
+        });
+      }).catch(function(){
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Find place';
+        planEls.status.textContent = 'Place search failed — check signal and try again. Nominatim is a free public server; if it\'s down, try again in a bit.';
+      });
+    }
+    searchBtn.addEventListener('click', doSearch);
+    inputEl.addEventListener('keydown', function(e){
+      if (e.key === 'Enter'){ e.preventDefault(); doSearch(); }
+    });
+  }
+  function wirePlan(){
+    wirePlanSearch(planEls.stopInput, planEls.stopSearchBtn, planEls.stopResults, function(p){
+      if (plan.stops.length >= PLAN_MAX_STOPS){
+        planEls.status.textContent = 'That\'s ' + PLAN_MAX_STOPS + ' stops — the most a plan holds. Remove one to add another.';
+        return;
+      }
+      plan.stops.push(p);
+      plan.route = null; // stops changed — the fetched route is stale
+      savePlan(); renderPlanStops(); renderPlanSummary();
+    });
+    wirePlanSearch(planEls.destInput, planEls.destSearchBtn, planEls.destResults, function(p){
+      plan.dest = p;
+      plan.route = null; // destination changed — the fetched route is stale
+      savePlan(); renderPlanStops(); renderPlanSummary();
+    });
+    function readRangeInputs(){
+      plan.rangeMi = planEls.rangeMi.value.trim();
+      var m = parseFloat(planEls.marginMi.value);
+      plan.marginMi = isFinite(m) && m >= 0 ? m : 20;
+      savePlan();
+      renderPlanSummary(); // re-plan the fuel stops on the cached route
+    }
+    planEls.rangeMi.addEventListener('change', readRangeInputs);
+    planEls.marginMi.addEventListener('change', readRangeInputs);
+    planEls.routeBtn.addEventListener('click', function(){
+      if (!plan.dest){
+        planEls.status.textContent = 'Pick a destination first — type a place above and tap Find place.';
+        return;
+      }
+      if (!state.lastPos){
+        planEls.status.textContent = 'Need a GPS fix first — tap Start Ride, wait for the dot to go green, then plan.';
+        return;
+      }
+      var from = { lat: state.lastPos.lat, lon: state.lastPos.lon };
+      var to = { lat: plan.dest.lat, lon: plan.dest.lon };
+      var stopNames = planStopNames();
+      planEls.routeBtn.disabled = true;
+      planEls.routeBtn.textContent = 'Planning…';
+      planEls.status.textContent = 'Planning a route to ' + plan.dest.name + (plan.stops.length ? ' via ' + plan.stops.length + (plan.stops.length === 1 ? ' stop' : ' stops') : '') + '…';
+      fetchPlanRoute(from, plan.stops, to, plan.dest.name, stopNames).then(function(res){
+        planEls.routeBtn.disabled = false;
+        planEls.routeBtn.textContent = 'Plan route';
+        plan.route = res.route; plan.source = res.source; plan.destName = plan.dest.name;
+        savePlan(); renderPlanSummary();
+        var stops = planFuelStops(plan.route.totalM, plan.rangeMi, plan.marginMi);
+        planEls.status.innerHTML = '<strong>Planned: ' + escXml(plan.dest.name) + '</strong> — ' + fmtDist(plan.route.totalM) + ' total' + (plan.stops.length ? ', ' + plan.stops.length + (plan.stops.length === 1 ? ' stop' : ' stops') : '') + (isFinite(parseFloat(plan.rangeMi)) && parseFloat(plan.rangeMi) > 0 ? ', ' + stops.length + (stops.length === 1 ? ' fuel stop' : ' fuel stops') : '') + '. Route cached — the plan works offline from here.';
+      }).catch(function(){
+        planEls.routeBtn.disabled = false;
+        planEls.routeBtn.textContent = 'Plan route';
+        planEls.status.textContent = 'Couldn\'t fetch a route — check signal and try again. Tried Valhalla, then OSRM; both are free public servers and either can be briefly down.';
+      });
+    });
+    planEls.navBtn.addEventListener('click', function(){
+      if (!plan.route) return;
+      startNavigation(plan.route, plan.destName || (plan.dest && plan.dest.name) || 'Planned route', plan.source || 'valhalla');
+    });
+    planEls.clearBtn.addEventListener('click', function(){
+      plan.stops = []; plan.dest = null; plan.route = null; plan.source = ''; plan.destName = '';
+      planEls.rangeMi.value = ''; plan.rangeMi = '';
+      try { localStorage.removeItem(PLAN_KEY); } catch (e){}
+      planEls.status.textContent = 'Plan cleared. Add stops between here and where you\'re headed, then plan the route.';
+      renderPlanStops(); renderPlanSummary();
+    });
+  }
+  function restorePlan(){
+    var saved = loadPlan();
+    if (!saved) return;
+    plan.stops = saved.stops || [];
+    plan.dest = saved.dest || null;
+    plan.rangeMi = saved.rangeMi || '';
+    plan.marginMi = isFinite(parseFloat(saved.marginMi)) ? parseFloat(saved.marginMi) : 20;
+    plan.route = saved.route || null;
+    plan.source = saved.source || '';
+    plan.destName = saved.destName || '';
+    if (plan.rangeMi !== '') planEls.rangeMi.value = plan.rangeMi;
+    planEls.marginMi.value = String(plan.marginMi);
+    renderPlanStops();
+    renderPlanSummary();
+    if (plan.route) planEls.status.textContent = 'Last plan: ' + plan.destName + ' — ' + fmtDist(plan.route.totalM) + ' total, cached on this device. Tap Navigate this plan to ride it, or Plan route to fetch it fresh.';
+  }
+
 
   // Recover a ride left open by a closed tab or a dead phone, then show history
   (function(){
@@ -2303,13 +3087,23 @@
   window.addEventListener('pagehide', function(){ if (state.currentRide) saveCurrent(state.currentRide); });
   wireGpxImport();
   wireNav();
+  wirePlan();
+  wireLean();
   restoreNav();
+  restorePlan();
   renderRideList();
 
   boxes.forEach(placeBox);
   refreshPanel();
   applyBrightness();
   render();
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+  var swUpdate = PG_SWUpdate.init({ container: document.querySelector('.topbar') });
 })();
 </script>
 </body>

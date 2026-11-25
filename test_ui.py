@@ -8,6 +8,8 @@ every 700 ms, with speed / heading / altitude / accuracy on every fix.
 Navigation tests intercept Nominatim / Valhalla / OSRM and return canned
 routes, so no network is needed; a second fake GPS walks a scripted path
 (north 600 m, then east 470 m) with a window.__fakeGeoJump(lat, lon) hook.
+Route-planning tests use a canned two-leg Valhalla route (north ~2.5 mi,
+then east ~2.0 mi) and check the plan summary, the legs, and the fuel stops.
 
 Run from this directory:
     /tmp/pw-render/bin/python test_ui.py
@@ -115,6 +117,31 @@ window.__fakeGeoJump = function(lat, lon){
   g._wp = Math.min(best+1, g._wps.length-1);
   if (g._wp === 0) g._wp = 1;
 };
+"""
+
+
+FAKE_MOTION = """
+window.__fakeMotion = function(gx, gy, gz){
+  var e = new Event('devicemotion');
+  e.accelerationIncludingGravity = { x: gx, y: gy, z: gz };
+  window.dispatchEvent(e);
+};
+window.__fakeOrient = function(beta, gamma){
+  var e = new Event('deviceorientation');
+  e.beta = beta; e.gamma = gamma; e.alpha = 0;
+  window.dispatchEvent(e);
+};
+"""
+
+FAKE_MOTION_DENIED = FAKE_MOTION + """
+try {
+  Object.defineProperty(window, 'DeviceMotionEvent', { value: { requestPermission: function(){ return Promise.resolve('denied'); } }, configurable: true });
+} catch (e) {}
+"""
+
+FAKE_NO_SENSOR = """
+try { delete window.DeviceMotionEvent; } catch (e) {}
+try { delete window.DeviceOrientationEvent; } catch (e) {}
 """
 
 
@@ -239,9 +266,63 @@ def turn_gpx_text():
 
 
 def mock_geocode(route):
+    # The planner test searches "Stop Town" for its waypoint and
+    # "Test Place" for its destination — answer each with its own name
+    # so the plan summary can tell the legs apart.
+    q = (route.request.url or "").lower()
+    if "stop" in q:
+        name = "Stop Town, AZ"
+    else:
+        name = "Test Place, Glendale, AZ"
     route.fulfill(status=200, content_type="application/json",
-                  body=json.dumps([{"display_name": "Test Place, Glendale, AZ",
+                  body=json.dumps([{"display_name": name,
                                     "lat": "33.5712", "lon": "-112.1596"}]))
+
+
+def valhalla_multi_route():
+    """Two-leg canned route for the planner: north ~2.5 mi, then east
+    ~2.0 mi. Leg 1 ends at the waypoint; leg 2 ends at the destination."""
+    leg1 = []
+    lat, lon = 33.5658, -112.1646
+    for i in range(41):
+        leg1.append((lat + i * 100.0 / 110540, lon))
+    clat = leg1[-1][0]
+    step_lon = 100.0 / (111320 * math.cos(math.radians(clat)))
+    leg2 = []
+    for i in range(33):
+        leg2.append((clat, lon + i * step_lon))
+
+    def leg_dict(pts, street):
+        total_mi = sum(hav_m(pts[i], pts[i + 1]) for i in range(len(pts) - 1)) / 1609.344
+        return {"shape": encode_polyline(pts),
+                "maneuvers": [
+                    {"type": 1, "instruction": "Drive.",
+                     "street_names": [street], "length": round(total_mi, 4),
+                     "begin_shape_index": 0, "end_shape_index": 1},
+                    {"type": 4, "instruction": "Your destination is on the right.",
+                     "street_names": [], "length": 0,
+                     "begin_shape_index": len(pts) - 1, "end_shape_index": len(pts) - 1},
+                ],
+                "summary": {"length": round(total_mi, 4), "time": 300}}
+
+    total_mi = (sum(hav_m(leg1[i], leg1[i + 1]) for i in range(len(leg1) - 1)) +
+                sum(hav_m(leg2[i], leg2[i + 1]) for i in range(len(leg2) - 1))) / 1609.344
+    return {"trip": {"units": "miles",
+                     "summary": {"length": round(total_mi, 4), "time": 600},
+                     "legs": [leg_dict(leg1, "North Test Road"),
+                              leg_dict(leg2, "East Test Road")]}}
+
+
+def make_valhalla_multi_mock():
+    calls = {"n": 0}
+
+    def handler(route):
+        calls["n"] += 1
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(valhalla_multi_route()))
+
+    handler.calls = calls
+    return handler
 
 
 def make_valhalla_mock():
@@ -365,12 +446,28 @@ def main():
                                   geolocation={"latitude": 33.5658, "longitude": -112.1646},
                                   permissions=["geolocation"])
         ctx.add_init_script(FAKE_GEO)
+        ctx.add_init_script(FAKE_MOTION)
         page = ctx.new_page()
         page.goto("http://127.0.0.1:%d/index.html" % port_shot)
         page.wait_for_timeout(1200)
         check("loads with speed 0", page.locator(".js-speed").first.inner_text() == "0")
+        # Lean: calibrate upright, then lean 30deg right mid-ride so the
+        # max lean lands in the saved ride's history row.
+        page.click("#stage")
+        page.wait_for_timeout(500)
+        page.click("#leanCalBtn")
+        page.wait_for_timeout(300)
+        page.evaluate("window.__fakeMotion(0, -9.8, 0)")
+        page.wait_for_timeout(400)
+        check("lean calibrates in Settings", "Live" in page.locator("#leanSensorState").inner_text())
+        page.click("#panelCloseBtn")
+        page.wait_for_timeout(300)
         page.click("#mainBtn")
-        page.wait_for_timeout(26000)
+        page.wait_for_timeout(5000)
+        for _ in range(3):
+            page.evaluate("window.__fakeMotion(4.9, -8.487, 0)")
+            page.wait_for_timeout(200)
+        page.wait_for_timeout(20400)
         check("recording card appears while riding",
               page.locator(".ride-item.recording").count() == 1)
         page.click("#mainBtn")  # Stop
@@ -380,6 +477,7 @@ def main():
         hist_text = saved.first.inner_text()
         print("  history row: " + hist_text.replace("\n", " | "))
         check("saved ride shows distance", re.search(r"Distance\s+[\d.]+", hist_text) is not None)
+        check("saved ride keeps its max lean", "Lean" in hist_text and "30°" in hist_text, hist_text.replace("\n", " | "))
         page.locator(".rides").scroll_into_view_if_needed()
         page.wait_for_timeout(400)
         page.screenshot(path=SHOT)
@@ -412,7 +510,7 @@ def main():
         page.on("dialog", lambda d: d.accept())
         page.goto("http://127.0.0.1:%d/index.html" % port_stage)
         page.wait_for_timeout(1200)
-        check("version line shows v1.2.1", "v1.2.1" in page.locator("#versionLine").inner_text())
+        check("version line shows v1.4.0", "v1.4.0" in page.locator("#versionLine").inner_text())
         check("history starts empty", page.locator("#ridesEmpty").is_visible())
 
         page.click("#mainBtn")
@@ -638,6 +736,191 @@ def main():
         check("Reset restores the public Valhalla URL",
               page.locator("#cfgValhalla").input_value() == "https://valhalla1.openstreetmap.de/route")
         page.click("#panelCloseBtn")
+        ctx.close()
+
+        # ---- Route planning: waypoints, distance, fuel stops ----
+        plan_valhalla = make_valhalla_multi_mock()
+        ctx = browser.new_context(viewport={"width": 390, "height": 844},
+                                  geolocation={"latitude": 33.5658, "longitude": -112.1646},
+                                  permissions=["geolocation"])
+        ctx.add_init_script(FAKE_GEO_NAV)
+        ctx.route("**nominatim.openstreetmap.org/**", mock_geocode)
+        ctx.route("**valhalla1.openstreetmap.de/**", plan_valhalla)
+        ctx.route("**router.project-osrm.org/**", mock_osrm)
+        page = ctx.new_page()
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1200)
+        page.click("#mainBtn")  # Start Ride so GPS fixes flow (plan needs a fix)
+        page.wait_for_timeout(3000)
+        # Add a waypoint stop, then the destination
+        page.fill("#planStopInput", "Stop Town")
+        page.click("#planStopSearchBtn")
+        page.wait_for_timeout(800)
+        check("plan stop search shows a result", page.locator("#planStopResults button").count() == 1)
+        page.locator("#planStopResults button").first.click()
+        page.wait_for_timeout(300)
+        check("plan stop lands in the stop list",
+              "Stop Town" in page.locator("#planStopList").inner_text())
+        page.fill("#planDestInput", "Test Place")
+        page.click("#planDestSearchBtn")
+        page.wait_for_timeout(800)
+        page.locator("#planDestResults button").first.click()
+        page.wait_for_timeout(300)
+        check("plan destination line shows the place",
+              page.locator("#planDestLine").is_visible()
+              and "Test Place" in page.locator("#planDestLine").inner_text())
+        # 2 mi per tank, stop 0.5 mi early: on a ~4.5 mi route the stops
+        # fall at 1.5 mi and 3.0 mi — one on each leg.
+        page.fill("#planRangeMi", "2")
+        page.fill("#planMarginMi", "0.5")
+        page.click("#planRouteBtn")
+        page.wait_for_timeout(1500)
+        check("plan summary appears", page.locator("#planSummary").is_visible())
+        total_text = page.locator("#planTotal").inner_text()
+        print("  plan total: " + total_text.replace("\n", " | "))
+        check("plan total is about 4.5 mi", "4.4" in total_text or "4.5" in total_text, total_text)
+        legs = page.locator("#planLegs li")
+        check("plan shows both legs", legs.count() == 2, "legs=%d" % legs.count())
+        check("first leg names the stop", "Stop Town" in legs.nth(0).inner_text())
+        check("second leg ends at the destination", "Test Place" in legs.nth(1).inner_text())
+        fuel = page.locator("#planFuelList li")
+        check("plan shows two fuel stops", fuel.count() == 2, "fuel=%d" % fuel.count())
+        fuel_text = page.locator("#planFuelList").inner_text()
+        print("  fuel stops: " + fuel_text.replace("\n", " | "))
+        check("first fuel stop is near the north leg street",
+              "Fuel stop 1" in fuel_text and "North Test Road" in fuel_text, fuel_text)
+        check("second fuel stop is near the waypoint",
+              "Fuel stop 2" in fuel_text and "Stop Town" in fuel_text, fuel_text)
+        # The plan drives the existing guidance: Navigate this plan opens
+        # the arrow screen on the merged route.
+        check("Navigate this plan is offered", page.locator("#planNavBtn").is_visible())
+        page.click("#planNavBtn")
+        page.wait_for_timeout(1200)
+        check("planned route opens the arrow screen", page.locator("#navView").is_visible())
+        page.click("#navEndBtn")
+        page.wait_for_timeout(300)
+        # The plan survives a reload from the on-device cache, with no
+        # new route request; Clear plan wipes it.
+        hits_before = plan_valhalla.calls["n"]
+        page.reload()
+        page.wait_for_timeout(1200)
+        check("plan restores from cache after reload", page.locator("#planSummary").is_visible())
+        check("restore made no new route request", plan_valhalla.calls["n"] == hits_before)
+        check("plan stop list restores too", "Stop Town" in page.locator("#planStopList").inner_text())
+        page.click("#planClearBtn")
+        page.wait_for_timeout(400)
+        check("Clear plan wipes the summary", not page.locator("#planSummary").is_visible())
+        check("Clear plan wipes the stop list", page.locator("#planStopList li").count() == 0)
+        ctx.close()
+
+        # ---- Lean angle (fake motion + orientation events) ----
+        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx.add_init_script(FAKE_MOTION)
+        page = ctx.new_page()
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1200)
+        check("lean tile starts by checking the sensor",
+              "Checking sensor" in page.locator("#leanSub").inner_text())
+        page.click("#stage")
+        page.wait_for_timeout(500)
+        check("lean sensor state shows in Settings",
+              "Checking" in page.locator("#leanSensorState").inner_text())
+        page.click("#leanCalBtn")
+        page.wait_for_timeout(300)
+        check("calibrate waits for the first sensor event",
+              "Waiting for sensor" in page.locator("#leanSensorState").inner_text())
+        page.evaluate("window.__fakeMotion(0, -9.8, 0)")
+        page.wait_for_timeout(400)
+        check("calibration captures the upright reference",
+              "Live" in page.locator("#leanSensorState").inner_text())
+        page.click("#panelCloseBtn")
+        page.wait_for_timeout(300)
+        check("upright reads 0 lean", page.locator("#leanValue").inner_text() == "0°")
+        page.evaluate("window.__fakeMotion(4.9, -8.487, 0)")
+        page.wait_for_timeout(400)
+        for _ in range(5):
+            page.evaluate("window.__fakeMotion(4.9, -8.487, 0)")
+            page.wait_for_timeout(150)
+        lean_txt = page.locator("#leanValue").inner_text()
+        m = re.match(r"(\d+)° R", lean_txt)
+        check("30deg right lean reads ~30 R once smoothing catches up",
+              m is not None and 25 <= int(m.group(1)) <= 35, lean_txt)
+        for _ in range(6):
+            page.evaluate("window.__fakeMotion(-4.9, -8.487, 0)")
+            page.wait_for_timeout(150)
+        lean_txt = page.locator("#leanValue").inner_text()
+        m = re.match(r"(\d+)° L", lean_txt)
+        check("left lean reads L once smoothing catches up",
+              m is not None and 20 <= int(m.group(1)) <= 35, lean_txt)
+        # Calibration survives a reload — no re-calibrate prompt
+        page.reload()
+        page.wait_for_timeout(1200)
+        check("calibration survives reload",
+              "Calibrate" not in page.locator("#leanSub").inner_text())
+        page.evaluate("window.__fakeMotion(0, -9.8, 0)")
+        page.wait_for_timeout(400)
+        check("upright still reads 0 after reload",
+              page.locator("#leanValue").inner_text() == "0°")
+        # Clearing the calibration returns to uncalibrated
+        page.click("#stage")
+        page.wait_for_timeout(500)
+        page.click("#leanResetBtn")
+        page.wait_for_timeout(300)
+        check("clearing calibration returns to uncalibrated",
+              "Not calibrated" in page.locator("#leanSensorState").inner_text())
+        page.click("#panelCloseBtn")
+        ctx.close()
+
+        # Orientation fallback: calibrate at beta=60, then the (beta,
+        # gamma) pair a real 30deg lean produces from there (48.59, 40.89
+        # — from the rotation-matrix round-trip in test.js).
+        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx.add_init_script(FAKE_MOTION)
+        page = ctx.new_page()
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1200)
+        page.click("#stage")
+        page.wait_for_timeout(500)
+        page.click("#leanCalBtn")
+        page.wait_for_timeout(300)
+        page.evaluate("window.__fakeOrient(60, 0)")
+        page.wait_for_timeout(400)
+        check("orientation event calibrates the reference",
+              "Live" in page.locator("#leanSensorState").inner_text())
+        page.click("#panelCloseBtn")
+        page.wait_for_timeout(300)
+        for _ in range(5):
+            page.evaluate("window.__fakeOrient(48.59, 40.89)")
+            page.wait_for_timeout(150)
+        lean_txt = page.locator("#leanValue").inner_text()
+        m = re.match(r"(\d+)° R", lean_txt)
+        check("orientation fallback reads the ~30deg lean",
+              m is not None and 25 <= int(m.group(1)) <= 35, lean_txt)
+        ctx.close()
+
+        # Permission denied: the tile says so, it never fakes a reading
+        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx.add_init_script(FAKE_MOTION_DENIED)
+        page = ctx.new_page()
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1200)
+        page.click("#stage")
+        page.wait_for_timeout(500)
+        page.click("#leanCalBtn")
+        page.wait_for_timeout(2200)
+        check("denied permission shows as denied, never a fake reading",
+              "Motion permission denied" in page.locator("#leanSensorState").inner_text()
+              and "Motion permission denied" in page.locator("#leanSub").inner_text())
+        ctx.close()
+
+        # No sensor APIs at all: plain "not available on this device"
+        ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        ctx.add_init_script(FAKE_NO_SENSOR)
+        page = ctx.new_page()
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(7500)
+        check("no sensor shows not-available, never a fake reading",
+              "Not available on this device" in page.locator("#leanSub").inner_text())
         ctx.close()
 
         browser.close()
