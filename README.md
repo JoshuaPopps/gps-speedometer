@@ -12,6 +12,8 @@ Lean angle is intentionally not included: it needs the phone fixed to the bike i
 
 **Route planning (v1.4.0):** the route half of the old route+fuel planner. In the Plan a route section, add stops between here and your destination (up to 8, in order), pick the destination, and plan: total distance, each leg with its distance and ride time, and where the fuel stops fall. Fuel stops come from your own miles per tank, minus a stop-early margin you set — the app never guesses a range for your bike. The whole plan (stops, destination, range, fetched route) is saved on the device, so it survives a reload and works offline from the cache; Navigate this plan hands the merged route to the same turn-by-turn arrow screen. The note under the planner cites published tank sizes from the garage library (1990 Softail FLSTC / 1995 Fat Boy FLSTF: 4.2 gal total, 0.75 gal reserve — Clymer Softail 1984–1999, Table 4, aftermarket; factory 1997–98 manual #99482-98 lists the same 4.2 gal total) so you can sanity-check your miles-per-tank number. Fuel logging itself is not here — that is the Dec 2 standalone push.
 
+**Planned-route GPX export (v1.5.0):** once a plan has a route, Export GPX downloads the plan as a GPX 1.1 file — the track follows the routed geometry, and the waypoints are Here, each stop, and the destination, so another app or a GPS can follow the same plan. Built from the route the planner already holds; no new network calls.
+
 ## Privacy
 
 What leaves the phone is only the route request itself — your position and the destination coordinates — sent to whichever routing server is configured. Nothing else leaves: no account, no identifier, no location history, no ride data. There is no analytics and no telemetry of any kind.

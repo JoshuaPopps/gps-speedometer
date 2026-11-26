@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-/* Node tests for the GPS Speedometer lean-angle maths (v1.3.0) and the
- * route-planning maths (v1.4.0: multi-leg merge, fuel-stop planning).
+/* Node tests for the GPS Speedometer lean-angle maths (v1.3.0), the
+ * route-planning maths (v1.4.0: multi-leg merge, fuel-stop planning),
+ * and the planned-route GPX export (v1.5.0).
  *
  * The app is a single-file PWA with no Node harness of its own — the UI
  * behaviour lives in test_ui.py (Playwright). This file covers the pure
@@ -50,17 +51,21 @@ function extractFn(src, name) {
 
 var html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 var fns = ['wrapDeg', 'gravityFromOrientation', 'leanFromGravity', 'smoothLean', 'nextMaxLean', 'fmtLean',
-  'haversine', 'mergeLegRoutes', 'planFuelStops', 'fuelStopLabel']
+  'haversine', 'mergeLegRoutes', 'planFuelStops', 'fuelStopLabel',
+  'escXml', 'isoTime', 'routePointAtM', 'buildPlanGpx', 'planGpxFileName']
   .map(function (n) { return extractFn(html, n); })
   .join('\n');
 // new Function (not eval): strict-mode eval would scope the declarations
 // away, this returns them as usable bindings instead.
-var leanFns = new Function(fns + '\nreturn { wrapDeg: wrapDeg, gravityFromOrientation: gravityFromOrientation, leanFromGravity: leanFromGravity, smoothLean: smoothLean, nextMaxLean: nextMaxLean, fmtLean: fmtLean, haversine: haversine, mergeLegRoutes: mergeLegRoutes, planFuelStops: planFuelStops, fuelStopLabel: fuelStopLabel };')();
+var leanFns = new Function(fns + '\nreturn { wrapDeg: wrapDeg, gravityFromOrientation: gravityFromOrientation, leanFromGravity: leanFromGravity, smoothLean: smoothLean, nextMaxLean: nextMaxLean, fmtLean: fmtLean, haversine: haversine, mergeLegRoutes: mergeLegRoutes, planFuelStops: planFuelStops, fuelStopLabel: fuelStopLabel, escXml: escXml, isoTime: isoTime, routePointAtM: routePointAtM, buildPlanGpx: buildPlanGpx, planGpxFileName: planGpxFileName };')();
 var wrapDeg = leanFns.wrapDeg, gravityFromOrientation = leanFns.gravityFromOrientation,
   leanFromGravity = leanFns.leanFromGravity, smoothLean = leanFns.smoothLean,
   nextMaxLean = leanFns.nextMaxLean, fmtLean = leanFns.fmtLean,
   haversine = leanFns.haversine, mergeLegRoutes = leanFns.mergeLegRoutes,
-  planFuelStops = leanFns.planFuelStops, fuelStopLabel = leanFns.fuelStopLabel;
+  planFuelStops = leanFns.planFuelStops, fuelStopLabel = leanFns.fuelStopLabel,
+  escXml = leanFns.escXml, isoTime = leanFns.isoTime,
+  routePointAtM = leanFns.routePointAtM, buildPlanGpx = leanFns.buildPlanGpx,
+  planGpxFileName = leanFns.planGpxFileName;
 
 /* ---- wrapDeg ---- */
 check('wrapDeg 370 -> 10', wrapDeg(370) === 10);
@@ -285,19 +290,102 @@ check('fuel stops: margin defaults sensibly when blank',
     fuelStopLabel({ waypoints: [], maneuvers: [{ kind: 'straight', street: '', atM: 5 * MI }] }, 10 * MI) === null);
 })();
 
+/* ---- Planned-route GPX export (v1.5.0) ---- */
+(function () {
+  // A merged two-leg route, built the way the planner builds one:
+  // leg 1 north ~2.5 mi, leg 2 east ~2.0 mi, one waypoint at the joint.
+  var leg1 = legPts(33.0, 33.001), leg2 = legPts(33.001, 33.002);
+  leg2.maneuvers[0].street = 'East Rd';
+  var route = mergeLegRoutes([leg1, leg2]);
+  route.destName = 'Test Place, Glendale, AZ';
+  route.source = 'valhalla';
+  route.fetchedAt = Date.UTC(2026, 10, 25, 12, 30);
+  route.legs = [{ name: 'Stop Town', distM: leg1.totalM, durS: 300 },
+                { name: 'Test Place, Glendale, AZ', distM: leg2.totalM, durS: 300 }];
+  route.waypoints = [{ name: 'Stop Town', atM: leg1.totalM }];
+  route.totalM = leg1.totalM + leg2.totalM;
+  var d = leg1.totalM;
+  check('routePointAtM finds the joint point at the boundary',
+    (function () {
+      var p = routePointAtM(route, d);
+      return p && approx(p.lat, 33.001, 1e-9) && approx(p.lon, -112.0, 1e-9);
+    })());
+  check('routePointAtM clamps past-the-end distances to the last point',
+    (function () {
+      var p = routePointAtM(route, 1e9);
+      return p && approx(p.lat, 33.002, 1e-9);
+    })());
+  check('routePointAtM returns the first point at distance 0',
+    (function () {
+      var p = routePointAtM(route, 0);
+      return p && approx(p.lat, 33.0, 1e-9);
+    })());
+  var gpx = buildPlanGpx(route);
+  check('plan GPX is valid GPX 1.1 from this app',
+    gpx.indexOf('<?xml version="1.0" encoding="UTF-8"?>') === 0 &&
+    gpx.indexOf('<gpx version="1.1" creator="GPS Speedometer"') !== -1);
+  check('plan GPX names the route after the destination',
+    gpx.indexOf('<name>Planned route to Test Place, Glendale, AZ</name>') !== -1);
+  check('plan GPX carries the fetched time in metadata',
+    gpx.indexOf('<time>2026-11-25T12:30:00.000Z</time>') !== -1);
+  check('plan GPX has all three waypoints: Here, stop, destination',
+    (function () {
+      var wpts = gpx.match(/<wpt /g) || [];
+      return wpts.length === 3 &&
+        gpx.indexOf('<name>Here</name>') !== -1 &&
+        gpx.indexOf('<name>Stop Town</name>') !== -1 &&
+        gpx.indexOf('<name>Test Place, Glendale, AZ</name>') !== -1;
+    })(), (gpx.match(/<wpt /g) || []).length + ' wpts');
+  check('plan GPX stop waypoint sits at the leg joint, not the geocode guess',
+    gpx.indexOf('<wpt lat="33.001000" lon="-112.000000"><name>Stop Town</name></wpt>') !== -1);
+  check('plan GPX destination waypoint is the last routed point',
+    gpx.indexOf('<wpt lat="33.002000" lon="-112.000000"><name>Test Place, Glendale, AZ</name></wpt>') !== -1);
+  check('plan GPX track follows the routed geometry, every point',
+    (gpx.match(/<trkpt /g) || []).length === route.points.length,
+    (gpx.match(/<trkpt /g) || []).length + ' trkpts, route has ' + route.points.length);
+  check('plan GPX escapes waypoint names with XML specials',
+    (function () {
+      var r2 = { points: [{ lat: 33.0, lon: -112.0 }, { lat: 33.001, lon: -112.0 }],
+        cum: [0, 111], waypoints: [{ name: 'Tom & Jerry\'s <Cafe>', atM: 111 }],
+        destName: 'A & B', fetchedAt: Date.UTC(2026, 10, 25) };
+      var g2 = buildPlanGpx(r2);
+      return g2.indexOf('Tom &amp; Jerry') !== -1 && g2.indexOf('A &amp; B') !== -1 &&
+        g2.indexOf('<Cafe>') === -1;
+    })());
+  check('plan GPX with no intermediate stops has just Here + destination',
+    (function () {
+      var r3 = { points: [{ lat: 33.0, lon: -112.0 }, { lat: 33.001, lon: -112.0 }],
+        cum: [0, 111], waypoints: [], destName: 'Solo', fetchedAt: Date.UTC(2026, 10, 25) };
+      var g3 = buildPlanGpx(r3);
+      return (g3.match(/<wpt /g) || []).length === 2;
+    })());
+  // Filename timestamps are local time (the app formats with local getters),
+  // so the expected values must be built the same way — hardcoding UTC
+  // strings fails in any non-UTC timezone (caught Nov 25: 100/100 in UTC,
+  // 98/100 in America/Phoenix).
+  function stamp(ms){ var d = new Date(ms); function p2(n){ return String(n).padStart(2, '0'); } return d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()); }
+  check('plan GPX filename slugs the destination and timestamps it',
+    planGpxFileName(route) === 'plan-test-place-glendale-az-' + stamp(route.fetchedAt) + '.gpx',
+    planGpxFileName(route));
+  check('plan GPX filename falls back to "route" with no destination',
+    planGpxFileName({ fetchedAt: Date.UTC(2026, 10, 25, 9, 5) }) === 'plan-route-' + stamp(Date.UTC(2026, 10, 25, 9, 5)) + '.gpx',
+    planGpxFileName({ fetchedAt: Date.UTC(2026, 10, 25, 9, 5) }));
+})();
+
 /* ---- Route planning is in the shipped page, with cited sources ---- */
 check('index.html has the Plan a route section', html.indexOf('id="planRouteBtn"') !== -1 && html.indexOf('Plan a route') !== -1);
+check('index.html has the Export GPX button in the planner', html.indexOf('id="planGpxBtn"') !== -1 && html.indexOf('Export GPX') !== -1);
 check('index.html cites the Clymer tank table (labeled aftermarket)', html.indexOf('Clymer Softail 1984') !== -1 && html.indexOf('aftermarket, not factory') !== -1);
 check('index.html cites the factory Softail manual 99482-98', html.indexOf('#99482-98') !== -1);
 check('index.html cites the factory Sportster manual 99484-98', html.indexOf('#99484-98') !== -1);
 check('index.html never hardcodes a tank size into the planner', html.indexOf('planRangeMi') !== -1 && html.indexOf('Miles per tank') !== -1);
-check('APP_VERSION is 1.4.0', html.indexOf("APP_VERSION = '1.4.0'") !== -1);
+check('APP_VERSION is 1.5.0', html.indexOf("APP_VERSION = '1.5.0'") !== -1);
 
 /* --- Service-worker update button (wired Nov 25, 2026) --- */
 (function () {
   var swSrc = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
   var appjs = html; // single-file app: the inline script is the app
-  check('sw.js cache is gps-speedometer-v2', swSrc.indexOf('gps-speedometer-v2') !== -1);
+  check('sw.js cache is gps-speedometer-v3', swSrc.indexOf('gps-speedometer-v3') !== -1);
   check('sw.js precaches sw-update.js', swSrc.indexOf('sw-update.js') !== -1);
   check('sw.js has the SKIP_WAITING message handler', swSrc.indexOf("addEventListener('message'") !== -1 && swSrc.indexOf('SKIP_WAITING') !== -1);
   check('sw.js skipWaiting runs only from the message handler, never on install', swSrc.split('skipWaiting()').length - 1 === 1);

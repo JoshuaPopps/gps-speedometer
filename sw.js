@@ -1,6 +1,6 @@
 /* GPS Speedometer service worker — app-shell cache so the speedometer
  * works offline in the garage. Version the cache name on release. */
-var CACHE = 'gps-speedometer-v2';
+var CACHE = 'gps-speedometer-v3';
 var ASSETS = [
   './', './index.html', './sw-update.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png'

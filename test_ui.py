@@ -510,7 +510,7 @@ def main():
         page.on("dialog", lambda d: d.accept())
         page.goto("http://127.0.0.1:%d/index.html" % port_stage)
         page.wait_for_timeout(1200)
-        check("version line shows v1.4.0", "v1.4.0" in page.locator("#versionLine").inner_text())
+        check("version line shows v1.5.0", "v1.5.0" in page.locator("#versionLine").inner_text())
         check("history starts empty", page.locator("#ridesEmpty").is_visible())
 
         page.click("#mainBtn")
@@ -791,6 +791,37 @@ def main():
               "Fuel stop 1" in fuel_text and "North Test Road" in fuel_text, fuel_text)
         check("second fuel stop is near the waypoint",
               "Fuel stop 2" in fuel_text and "Stop Town" in fuel_text, fuel_text)
+        # Export GPX: the plan downloads as a GPX 1.1 file — waypoints
+        # for Here, the stop, and the destination; the track follows
+        # the routed geometry (41 + 33 points, joint deduped = 73).
+        check("Export GPX is offered once the plan has a route",
+              page.locator("#planGpxBtn").is_visible())
+        with page.expect_download() as dl_info:
+            page.click("#planGpxBtn")
+        dl = dl_info.value
+        plan_gpx_path = "/tmp/speedo-plan-export-test.gpx"
+        dl.save_as(plan_gpx_path)
+        plan_gpx = open(plan_gpx_path).read()
+        plan_pts = len(re.findall(r"<trkpt ", plan_gpx))
+        plan_wpts = re.findall(r"<wpt lat=\"([^\"]+)\" lon=\"([^\"]+)\"><name>([^<]+)</name></wpt>", plan_gpx)
+        check("plan GPX export is valid GPX 1.1",
+              plan_gpx.startswith("<?xml") and '<gpx version="1.1"' in plan_gpx,
+              "trkpts=%d" % plan_pts)
+        check("plan GPX track follows the routed geometry", plan_pts == 73, "trkpts=%d" % plan_pts)
+        check("plan GPX has Here, stop, and destination waypoints",
+              [w[2] for w in plan_wpts] == ["Here", "Stop Town, AZ", "Test Place, Glendale, AZ"],
+              str([w[2] for w in plan_wpts]))
+        check("plan GPX stop waypoint sits at the leg joint",
+              len(plan_wpts) == 3 and abs(float(plan_wpts[1][0]) - 33.60198) < 0.00001
+              and abs(float(plan_wpts[1][1]) - (-112.1646)) < 0.00001,
+              str(plan_wpts[1]) if len(plan_wpts) > 1 else "no wpts")
+        check("plan GPX destination waypoint is the last routed point",
+              len(plan_wpts) == 3 and abs(float(plan_wpts[2][0]) - 33.60198) < 0.00001
+              and float(plan_wpts[2][1]) > -112.1646,
+              str(plan_wpts[2]) if len(plan_wpts) > 2 else "no wpts")
+        check("plan GPX filename slugs the destination",
+              dl.suggested_filename.startswith("plan-test-place-glendale-az-")
+              and dl.suggested_filename.endswith(".gpx"), dl.suggested_filename)
         # The plan drives the existing guidance: Navigate this plan opens
         # the arrow screen on the merged route.
         check("Navigate this plan is offered", page.locator("#planNavBtn").is_visible())
@@ -807,9 +838,14 @@ def main():
         check("plan restores from cache after reload", page.locator("#planSummary").is_visible())
         check("restore made no new route request", plan_valhalla.calls["n"] == hits_before)
         check("plan stop list restores too", "Stop Town" in page.locator("#planStopList").inner_text())
+        check("Export GPX survives reload with the restored plan",
+              page.locator("#planGpxBtn").is_visible())
         page.click("#planClearBtn")
         page.wait_for_timeout(400)
         check("Clear plan wipes the summary", not page.locator("#planSummary").is_visible())
+        check("Clear plan hides Export GPX", not page.locator("#planGpxBtn").is_visible())
+        check("Clear plan hides Navigate this plan too",
+              not page.locator("#planNavBtn").is_visible())
         check("Clear plan wipes the stop list", page.locator("#planStopList li").count() == 0)
         ctx.close()
 

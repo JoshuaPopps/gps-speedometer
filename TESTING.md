@@ -19,9 +19,15 @@ continues), `planFuelStops` (one stop every range-minus-margin miles,
 no stops without a usable range), and `fuelStopLabel` (nearest named
 waypoint or turn street at or before the stop, inside 15 miles) are
 extracted from `index.html` and tested on synthetic legs and routes.
-The file also asserts the Plan a route section and its library
+The planned-route GPX export (v1.5.0) is covered the same way:
+`buildPlanGpx` (waypoints for Here, each stop, and the destination;
+the track follows the routed geometry), `routePointAtM` (nearest
+routed point at or past an along-route distance, clamped to the last
+point), and `planGpxFileName` (plan-<destination slug>-<timestamp>.gpx)
+are extracted from `index.html` and tested on a synthetic merged
+route. The file also asserts the Plan a route section and its library
 citations are in the shipped page, and that the service-worker cache
-is `gps-speedometer-v2`.
+is `gps-speedometer-v3`.
 
 Run (from this directory):
 

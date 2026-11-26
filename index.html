@@ -130,6 +130,7 @@
     display:flex; align-items:center; justify-content:center; gap:7px; text-align:center;
   }
   .ghost-btn:active{ transform:translate(1px,1px); }
+  .ghost-btn[hidden]{ display:none; } /* display:flex above beats the UA [hidden] rule — without this, hidden ghost buttons (Navigate this plan, Export GPX) stay visible */
   .ghost-btn[aria-pressed="true"]{ background:var(--accent-dim); border-color:var(--accent); color:var(--accent-bright); }
   .ghost-btn:disabled{ opacity:.45; cursor:not-allowed; }
   .install-btn{ width:100%; margin-top:12px; flex:none; border-style:dashed; border-color:var(--chip-line); font-weight:700; }
@@ -517,6 +518,7 @@
     <div class="row-btns">
       <button type="button" class="ghost-btn" id="planRouteBtn">Plan route</button>
       <button type="button" class="ghost-btn" id="planNavBtn" hidden>Navigate this plan</button>
+      <button type="button" class="ghost-btn" id="planGpxBtn" hidden>Export GPX</button>
     </div>
     <div class="plan-summary" id="planSummary" hidden>
       <div class="plan-total" id="planTotal"></div>
@@ -835,7 +837,7 @@
      A ride is one Start → Stop session. A tap that goes nowhere
      (under 5 track points and under 50 m) is not saved. If the tab
      closes mid-ride, the in-progress ride is recovered on next load. */
-  var APP_VERSION = '1.4.0';
+  var APP_VERSION = '1.5.0';
   var RIDES_KEY = 'gpsSpeedo.rides.v1';
   var CURRENT_KEY = 'gpsSpeedo.current.v1';
   var MAX_RIDES = 30;
@@ -958,6 +960,55 @@
     var d = new Date(ride.start);
     function p2(n){ return String(n).padStart(2, '0'); }
     return 'ride-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '.gpx';
+  }
+  /* ----- Planned-route GPX export (v1.5.0) -----
+     Built from the route the planner already holds — no new network
+     calls. The track follows the routed geometry (Valhalla/OSRM shape,
+     merged across legs); the waypoints are the stops the planner has:
+     Here, each intermediate stop, and the destination. The planner
+     keeps an intermediate stop as a name + along-route distance only,
+     so its coordinate is the routed point at that distance — the leg
+     joint IS the stop, so this is the stop's position, not an
+     approximation. */
+  function routePointAtM(route, atM){
+    var pts = route.points, cum = route.cum || [];
+    if (!pts || !pts.length) return null;
+    for (var i = 0; i < pts.length; i++){
+      if (cum.length > i && cum[i] >= atM) return pts[i];
+    }
+    return pts[pts.length - 1];
+  }
+  function buildPlanGpx(route){
+    var destName = route.destName || 'Planned route';
+    var name = 'Planned route to ' + destName;
+    var when = route.fetchedAt ? isoTime(route.fetchedAt) : isoTime(Date.now());
+    var out = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<gpx version="1.1" creator="GPS Speedometer" xmlns="http://www.topografix.com/GPX/1/1">',
+      '  <metadata><name>' + escXml(name) + '</name><time>' + when + '</time></metadata>'
+    ];
+    var wpts = [{ name: 'Here', lat: route.points[0].lat, lon: route.points[0].lon }];
+    (route.waypoints || []).forEach(function(w){
+      var p = routePointAtM(route, w.atM || 0);
+      if (p) wpts.push({ name: w.name, lat: p.lat, lon: p.lon });
+    });
+    var last = route.points[route.points.length - 1];
+    wpts.push({ name: destName, lat: last.lat, lon: last.lon });
+    wpts.forEach(function(w){
+      out.push('  <wpt lat="' + w.lat.toFixed(6) + '" lon="' + w.lon.toFixed(6) + '"><name>' + escXml(w.name) + '</name></wpt>');
+    });
+    out.push('  <trk><name>' + escXml(name) + '</name><trkseg>');
+    route.points.forEach(function(p){
+      out.push('    <trkpt lat="' + p.lat.toFixed(6) + '" lon="' + p.lon.toFixed(6) + '"></trkpt>');
+    });
+    out.push('  </trkseg></trk>', '</gpx>');
+    return out.join('\n');
+  }
+  function planGpxFileName(route){
+    var d = new Date(route.fetchedAt || Date.now());
+    function p2(n){ return String(n).padStart(2, '0'); }
+    var slug = String(route.destName || 'route').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'route';
+    return 'plan-' + slug + '-' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '.gpx';
   }
   function downloadText(name, text, type){
     var blob = new Blob([text], { type: type || 'application/gpx+xml' });
@@ -2826,7 +2877,7 @@
     destInput: $('planDestInput'), destSearchBtn: $('planDestSearchBtn'),
     destResults: $('planDestResults'), destLine: $('planDestLine'),
     rangeMi: $('planRangeMi'), marginMi: $('planMarginMi'),
-    routeBtn: $('planRouteBtn'), navBtn: $('planNavBtn'), clearBtn: $('planClearBtn'),
+    routeBtn: $('planRouteBtn'), navBtn: $('planNavBtn'), gpxBtn: $('planGpxBtn'), clearBtn: $('planClearBtn'),
     summary: $('planSummary'), total: $('planTotal'), legs: $('planLegs'),
     fuelList: $('planFuelList')
   };
@@ -2890,6 +2941,7 @@
     var hasRoute = !!(plan.route && plan.route.points && plan.route.points.length >= 2);
     planEls.summary.hidden = !hasRoute;
     planEls.navBtn.hidden = !hasRoute;
+    planEls.gpxBtn.hidden = !hasRoute;
     if (!hasRoute) return;
     var route = plan.route;
     var rideTime = route.totalS > 0 ? formatTime(route.totalS * 1000) : '';
@@ -3045,6 +3097,10 @@
     planEls.navBtn.addEventListener('click', function(){
       if (!plan.route) return;
       startNavigation(plan.route, plan.destName || (plan.dest && plan.dest.name) || 'Planned route', plan.source || 'valhalla');
+    });
+    planEls.gpxBtn.addEventListener('click', function(){
+      if (!plan.route) return;
+      downloadText(planGpxFileName(plan.route), buildPlanGpx(plan.route));
     });
     planEls.clearBtn.addEventListener('click', function(){
       plan.stops = []; plan.dest = null; plan.route = null; plan.source = ''; plan.destName = '';
