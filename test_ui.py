@@ -12,7 +12,7 @@ Route-planning tests use a canned two-leg Valhalla route (north ~2.5 mi,
 then east ~2.0 mi) and check the plan summary, the legs, and the fuel stops.
 
 Run from this directory:
-    /tmp/pw-render/bin/python test_ui.py
+    /tmp/pw3/bin/python test_ui.py
 
 Also writes ~/workspace/gps-speedometer-rides-v1.png (ride history) and
 ~/workspace/gps-speedometer-nav-v1.png (arrow screen mid-route).
@@ -363,6 +363,15 @@ def turn_dist_m(page):
     return float(t.replace("mi", "").strip()) * 1609.344
 
 
+def mock_bikelog(route):
+    # The send target (joshuapopps.github.io) is not reachable from
+    # this sandbox, so a real navigation lands on chrome-error and
+    # the handoff URL is lost. Stub it: the navigation still happens
+    # and page.url still carries the full ?handoff= link to decode.
+    route.fulfill(status=200, content_type="text/html",
+                  body="<html><body>bike log stub</body></html>")
+
+
 def route_to_test_place(page):
     """Search 'Test Place', confirm it, start GPS, route. Assumes the
     geocode + route hosts are already mocked for this page."""
@@ -506,11 +515,12 @@ def main():
                                   geolocation={"latitude": 33.5658, "longitude": -112.1646},
                                   permissions=["geolocation"])
         ctx.add_init_script(FAKE_GEO)
+        ctx.route("**joshuapopps.github.io/bike-maintenance-log-pwa/**", mock_bikelog)
         page = ctx.new_page()
         page.on("dialog", lambda d: d.accept())
         page.goto("http://127.0.0.1:%d/index.html" % port_stage)
         page.wait_for_timeout(1200)
-        check("version line shows v1.5.0", "v1.5.0" in page.locator("#versionLine").inner_text())
+        check("version line shows v1.6.0", "v1.6.0" in page.locator("#versionLine").inner_text())
         check("history starts empty", page.locator("#ridesEmpty").is_visible())
 
         page.click("#mainBtn")
@@ -537,6 +547,50 @@ def main():
         check("GPX has the recorded track points", pts >= 4, "trkpts=%d" % pts)
         check("GPX carries times and speeds", "<time>" in gpx and "<speed>" in gpx)
         check("GPX filename looks right", dl.suggested_filename.startswith("ride-") and dl.suggested_filename.endswith(".gpx"), dl.suggested_filename)
+
+        # Send to Bike Log — the panel asks which bike (none
+        # pre-selected, Send disabled until one is picked), and Send
+        # builds a ride-to-ride link to the Bike Log. The link is
+        # decoded here and checked, not just eyeballed.
+        saved.first.locator(".ride-actions .ghost-btn", has_text="Send to Bike Log").first.click()
+        page.wait_for_timeout(500)
+        check("send panel opens for a saved ride", page.locator("#handoffScrim").is_visible())
+        summary = page.locator("#handoffSummary").inner_text()
+        check("send panel names the ride and its miles",
+              "Ride " in summary and "mi" in summary and "recorded ride" in summary, summary)
+        check("send panel lists the three roster bikes, none picked",
+              page.locator("input[name='handoff-bike']").count() == 3
+              and page.locator("input[name='handoff-bike']:checked").count() == 0)
+        check("send stays disabled until a bike is picked",
+              page.locator("#handoffSendBtn").is_disabled())
+        page.locator("input[name='handoff-bike'][value='b2']").check()
+        page.wait_for_timeout(200)
+        check("send enables once a bike is picked", page.locator("#handoffSendBtn").is_enabled())
+        page.click("#handoffSendBtn")
+        try:
+            page.wait_for_url("https://joshuapopps.github.io/bike-maintenance-log-pwa/?handoff=*", timeout=15000)
+        except Exception:
+            pass
+        sent_url = page.url
+        check("send navigates to the bike log with a handoff link",
+              sent_url.startswith("https://joshuapopps.github.io/bike-maintenance-log-pwa/?handoff="), sent_url)
+        try:
+            import base64 as _b64
+            _raw = sent_url.split("handoff=", 1)[1]
+            _raw += "=" * (-len(_raw) % 4)
+            _env = json.loads(_b64.urlsafe_b64decode(_raw).decode())
+            check("sent link is a ride-to-ride handoff for b2, no odometer in it",
+                  _env.get("kind") == "ride-to-ride" and _env.get("from") == "gps-speedometer"
+                  and _env.get("bike", {}).get("rosterKey") == "b2"
+                  and _env.get("payload", {}).get("ride", {}).get("kind") == "recorded"
+                  and _env.get("payload", {}).get("ride", {}).get("miles", 0) > 0
+                  and "odometer" not in json.dumps(_env), json.dumps(_env)[:200])
+        except Exception as e:
+            check("sent link decodes as a ride handoff", False, str(e))
+        # Back to the speedo: the ride is still in history (the send
+        # only opened a link — it wrote nothing here).
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1000)
 
         # Persistence across reload
         page.reload()
@@ -747,6 +801,7 @@ def main():
         ctx.route("**nominatim.openstreetmap.org/**", mock_geocode)
         ctx.route("**valhalla1.openstreetmap.de/**", plan_valhalla)
         ctx.route("**router.project-osrm.org/**", mock_osrm)
+        ctx.route("**joshuapopps.github.io/bike-maintenance-log-pwa/**", mock_bikelog)
         page = ctx.new_page()
         page.goto("http://127.0.0.1:%d/index.html" % port_stage)
         page.wait_for_timeout(1200)
@@ -840,6 +895,46 @@ def main():
         check("plan stop list restores too", "Stop Town" in page.locator("#planStopList").inner_text())
         check("Export GPX survives reload with the restored plan",
               page.locator("#planGpxBtn").is_visible())
+        # Send plan to Bike Log — the panel asks which bike (none
+        # pre-selected, Send disabled until one is picked), and Send
+        # builds a planned ride-to-ride link. Decoded and checked.
+        check("Send to Bike Log is offered once the plan has a route",
+              page.locator("#planSendBtn").is_visible())
+        page.click("#planSendBtn")
+        page.wait_for_timeout(500)
+        check("send panel opens for the plan", page.locator("#handoffScrim").is_visible())
+        plan_summary = page.locator("#handoffSummary").inner_text()
+        check("send panel names the planned route, not ridden yet",
+              "Planned:" in plan_summary and "not ridden yet" in plan_summary, plan_summary)
+        check("plan send stays disabled until a bike is picked",
+              page.locator("#handoffSendBtn").is_disabled())
+        page.locator("input[name='handoff-bike'][value='b1']").check()
+        page.wait_for_timeout(200)
+        page.click("#handoffSendBtn")
+        try:
+            page.wait_for_url("https://joshuapopps.github.io/bike-maintenance-log-pwa/?handoff=*", timeout=15000)
+        except Exception:
+            pass
+        plan_url = page.url
+        check("plan send navigates to the bike log with a handoff link",
+              plan_url.startswith("https://joshuapopps.github.io/bike-maintenance-log-pwa/?handoff="), plan_url)
+        try:
+            import base64 as _b64
+            _raw = plan_url.split("handoff=", 1)[1]
+            _raw += "=" * (-len(_raw) % 4)
+            _env = json.loads(_b64.urlsafe_b64decode(_raw).decode())
+            _ride = _env.get("payload", {}).get("ride", {})
+            check("sent plan link is a planned ride-to-ride handoff for b1",
+                  _env.get("kind") == "ride-to-ride" and _env.get("bike", {}).get("rosterKey") == "b1"
+                  and _ride.get("kind") == "planned" and _ride.get("miles", 0) > 0
+                  and "not ridden yet" in _ride.get("notes", "")
+                  and "Stop Town" in _ride.get("route", ""), json.dumps(_env)[:250])
+        except Exception as e:
+            check("sent plan link decodes as a planned ride handoff", False, str(e))
+        page.goto("http://127.0.0.1:%d/index.html" % port_stage)
+        page.wait_for_timeout(1200)
+        check("plan still there after coming back from the send",
+              page.locator("#planSummary").is_visible())
         page.click("#planClearBtn")
         page.wait_for_timeout(400)
         check("Clear plan wipes the summary", not page.locator("#planSummary").is_visible())

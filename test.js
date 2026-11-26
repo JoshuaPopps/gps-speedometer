@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* Node tests for the GPS Speedometer lean-angle maths (v1.3.0), the
  * route-planning maths (v1.4.0: multi-leg merge, fuel-stop planning),
- * and the planned-route GPX export (v1.5.0).
+ * the planned-route GPX export (v1.5.0), and the ride handoff to the
+ * Bike Maintenance Log (v1.6.0, kind "ride-to-ride").
  *
  * The app is a single-file PWA with no Node harness of its own — the UI
  * behaviour lives in test_ui.py (Playwright). This file covers the pure
@@ -379,13 +380,14 @@ check('index.html cites the Clymer tank table (labeled aftermarket)', html.index
 check('index.html cites the factory Softail manual 99482-98', html.indexOf('#99482-98') !== -1);
 check('index.html cites the factory Sportster manual 99484-98', html.indexOf('#99484-98') !== -1);
 check('index.html never hardcodes a tank size into the planner', html.indexOf('planRangeMi') !== -1 && html.indexOf('Miles per tank') !== -1);
-check('APP_VERSION is 1.5.0', html.indexOf("APP_VERSION = '1.5.0'") !== -1);
+check('APP_VERSION is 1.6.0', html.indexOf("APP_VERSION = '1.6.0'") !== -1);
 
 /* --- Service-worker update button (wired Nov 25, 2026) --- */
 (function () {
   var swSrc = fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8');
   var appjs = html; // single-file app: the inline script is the app
-  check('sw.js cache is gps-speedometer-v3', swSrc.indexOf('gps-speedometer-v3') !== -1);
+  check('sw.js cache is gps-speedometer-v4', swSrc.indexOf('gps-speedometer-v4') !== -1);
+  check('sw.js precaches handoff.js', swSrc.indexOf('handoff.js') !== -1);
   check('sw.js precaches sw-update.js', swSrc.indexOf('sw-update.js') !== -1);
   check('sw.js has the SKIP_WAITING message handler', swSrc.indexOf("addEventListener('message'") !== -1 && swSrc.indexOf('SKIP_WAITING') !== -1);
   check('sw.js skipWaiting runs only from the message handler, never on install', swSrc.split('skipWaiting()').length - 1 === 1);
@@ -393,6 +395,156 @@ check('APP_VERSION is 1.5.0', html.indexOf("APP_VERSION = '1.5.0'") !== -1);
   check('PG_SWUpdate.init is called at startup', appjs.indexOf("PG_SWUpdate.init({ container: document.querySelector('.topbar') })") !== -1);
   check('vendored sw-update.js is byte-identical to canonical', fs.readFileSync(path.join(__dirname, 'sw-update.js'), 'utf8') === fs.readFileSync(path.join(__dirname, '..', '..', 'sw-update.js'), 'utf8'));
 })();
+
+/* ---- Ride handoff to the Bike Log (v1.6.0, kind "ride-to-ride") ---- */
+var H = require('./handoff.js');
+var BikeLog = require('../bike-maintenance-log-pwa/app.js');
+function throwsH(name, fn) {
+  var threw = false;
+  try { fn(); } catch (e) { threw = true; }
+  check(name, threw);
+}
+(function () {
+  var MI = 1609.344;
+  // A finished recorded ride: 87.4 mi, top ~62 mph, 2h 14m, some climb, some lean.
+  var ride = {
+    id: 'r1', start: Date.UTC(2026, 10, 25, 16, 30), end: Date.UTC(2026, 10, 25, 18, 44),
+    durationMs: (2 * 60 + 14) * 60 * 1000, distanceM: 87.4 * MI,
+    maxMs: 62 / 2.23694, gainM: 300, maxLeanDeg: 28,
+    points: [{ lat: 33.5, lon: -112.1, t: Date.UTC(2026, 10, 25, 16, 30) }], imported: false
+  };
+  // The ride date is a LOCAL date (the app's GPX-filename convention),
+  // so the expected value is built with local getters, not UTC strings.
+  function localISO(ms) {
+    var d = new Date(ms);
+    function p2(n) { return String(n).padStart(2, '0'); }
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+  }
+  var payload = H.recordedRidePayload(ride);
+  check('recorded ride payload keeps miles to one decimal',
+    payload.miles === 87.4, String(payload.miles));
+  check('recorded ride payload dates the ride by its local start day',
+    payload.date === localISO(ride.start), payload.date);
+  check('recorded ride payload names the ride by its day',
+    payload.route === 'Ride Nov 25, 2026', payload.route);
+  check('recorded ride payload notes carry only recorded figures',
+    payload.notes.indexOf('Recorded ride') === 0 &&
+    payload.notes.indexOf('top 62 mph') !== -1 &&
+    payload.notes.indexOf('2h 14m') !== -1 &&
+    payload.notes.indexOf('984 ft climb') !== -1 &&
+    payload.notes.indexOf('max lean 28°') !== -1, payload.notes);
+  check('recorded ride payload is kind recorded',
+    payload.kind === 'recorded');
+  check('recorded ride with no climb or lean gets no zero figures in its notes',
+    (function () {
+      var flat = H.recordedRidePayload({
+        start: Date.UTC(2026, 10, 25, 9, 0), durationMs: 30 * 60 * 1000,
+        distanceM: 10 * MI, maxMs: 20 / 2.23694, gainM: 0, maxLeanDeg: 0
+      });
+      return flat.notes.indexOf('climb') === -1 && flat.notes.indexOf('lean') === -1;
+    })());
+  check('imported ride keeps its own name as the route',
+    H.recordedRidePayload({
+      start: Date.UTC(2026, 10, 20, 10, 0), durationMs: 60 * 60 * 1000,
+      distanceM: 25 * MI, maxMs: 30 / 2.23694, imported: true, name: 'Test import ride'
+    }).route === 'Test import ride');
+  throwsH('recorded ride with no miles cannot be sent', function () {
+    H.recordedRidePayload({ start: Date.now(), durationMs: 1000, distanceM: 0, maxMs: 0 });
+  });
+  throwsH('recorded ride with no start time cannot be sent', function () {
+    H.recordedRidePayload({ durationMs: 1000, distanceM: 1000, maxMs: 1 });
+  });
+  // A planned route: Here -> Wickenburg -> Tortilla Flat, 87.4 mi total.
+  var planRoute = {
+    destName: 'Tortilla Flat, AZ', source: 'valhalla', fetchedAt: Date.UTC(2026, 10, 25, 12, 30),
+    points: [{ lat: 33.0, lon: -112.0 }, { lat: 33.1, lon: -112.0 }, { lat: 33.2, lon: -112.0 }],
+    cum: [0, 70000, 140650], totalM: 87.4 * MI, totalS: 5400,
+    waypoints: [{ name: 'Wickenburg', atM: 70000 }]
+  };
+  var planPayload = H.plannedRidePayload(planRoute);
+  check('planned ride payload lists the stops in order, Here first',
+    planPayload.route === 'Planned: Here → Wickenburg → Tortilla Flat, AZ', planPayload.route);
+  check('planned ride payload keeps the planned miles to one decimal',
+    planPayload.miles === 87.4);
+  check('planned ride payload is kind planned and says so in its notes',
+    planPayload.kind === 'planned' && planPayload.notes.indexOf('not ridden yet') !== -1);
+  check('planned ride payload dates the plan by its fetched day',
+    planPayload.date === localISO(planRoute.fetchedAt), planPayload.date);
+  throwsH('planned route with no line cannot be sent', function () {
+    H.plannedRidePayload({ destName: 'Nowhere', totalM: 1000, points: [] });
+  });
+  throwsH('planned route with no miles cannot be sent', function () {
+    H.plannedRidePayload({ destName: 'Nowhere', totalM: 0, points: [{ lat: 0, lon: 0 }, { lat: 1, lon: 1 }] });
+  });
+  // Envelope + URL.
+  check('handoff roster is exactly b1/b2/b3 with the shared names',
+    H.ROSTER.length === 3 && H.ROSTER[0].name === '1995 Fat Boy Bobber' &&
+    H.ROSTER[1].name === '1990 Softail' && H.ROSTER[2].name === '1947 Knucklehead');
+  var env = H.buildEnvelope(payload, { rosterKey: 'b2' });
+  check('handoff envelope carries the ride verbatim under kind ride-to-ride',
+    env.format === 'pocket-garage-handoff' && env.version === 1 &&
+    env.kind === 'ride-to-ride' && env.from === 'gps-speedometer' &&
+    env.bike.rosterKey === 'b2' && env.bike.name === '1990 Softail' &&
+    env.payload.ride.miles === 87.4 && env.payload.ride.kind === 'recorded');
+  check('handoff envelope carries no odometer figure',
+    JSON.stringify(env).indexOf('odometer') === -1);
+  throwsH('buildEnvelope throws with no bike picked', function () {
+    H.buildEnvelope(payload, null);
+  });
+  throwsH('buildEnvelope throws with an unknown roster key', function () {
+    H.buildEnvelope(payload, { rosterKey: 'b9' });
+  });
+  throwsH('buildEnvelope throws on a zero-mile payload', function () {
+    H.buildEnvelope({ date: '2026-11-25', route: 'Ride', miles: 0, notes: '', kind: 'recorded' }, { rosterKey: 'b2' });
+  });
+  throwsH('buildEnvelope throws on a route over 200 chars', function () {
+    var p = { date: '2026-11-25', route: new Array(202).join('x'), miles: 10, notes: '', kind: 'recorded' };
+    H.buildEnvelope(p, { rosterKey: 'b2' });
+  });
+  var url = H.buildUrl(payload, { rosterKey: 'b2' });
+  check('handoff url targets the bike log and round-trips through base64url',
+    url.indexOf('https://joshuapopps.github.io/bike-maintenance-log-pwa/?handoff=') === 0 &&
+    /^[-A-Za-z0-9_]+$/.test(url.split('handoff=')[1]));
+  // Receiver round-trip: the bike log parses it, resolves the bike,
+  // previews the ride, and adding it leaves the odometer alone.
+  var parsed = BikeLog.parsePocketHandoff(url.split('handoff=')[1]);
+  check('bike log parses the ride handoff',
+    parsed.kind === 'ride-to-ride' && parsed.payload.ride.miles === 87.4);
+  var store = BikeLog.emptyStore();
+  var bike = BikeLog.addBike(store, { name: '1990 Softail', year: '1990', make: 'Harley-Davidson', model: 'Heritage Classic', odometer: '42000' });
+  var bid = Object.keys(store.bikes).filter(function (id) { return store.bikes[id] === bike; })[0];
+  check('ride handoff resolves by name match (no pin yet)',
+    BikeLog.resolvePocketHandoffBike(store, parsed).via === 'name');
+  var preview = BikeLog.rideFromHandoff(store, parsed, bid);
+  check('receiver preview carries the ride exactly, no existing ride yet',
+    preview.route === 'Ride Nov 25, 2026' && preview.miles === 87.4 &&
+    preview.existingRideId === null);
+  var added = BikeLog.addRide(store, {
+    bike_id: bid, date: preview.date, route: preview.route,
+    miles: preview.miles, notes: preview.notes
+  });
+  check('confirming adds the ride to the Rides tab',
+    !!added && store.rides.length === 1 && store.rides[0].miles === 87.4);
+  check('confirming a ride handoff does not move the odometer',
+    store.bikes[bid].odometer === 42000);
+  var preview2 = BikeLog.rideFromHandoff(store, parsed, bid);
+  check('sending the same ride twice flags the duplicate, never silently',
+    preview2.existingRideId === store.rides[0].id);
+})();
+
+/* ---- The send UI is wired in the shipped page ---- */
+check('index.html loads handoff.js before the inline main script',
+  html.indexOf('<script src="handoff.js"></script>') !== -1 &&
+  html.indexOf('handoff.js') < html.indexOf('<script>\n(function(){'));
+check('index.html has a Send to Bike Log button on each saved ride',
+  html.indexOf("sendBtn.textContent = 'Send to Bike Log'") !== -1);
+check('index.html has a Send to Bike Log button on the plan summary',
+  html.indexOf('id="planSendBtn"') !== -1);
+check('index.html has the handoff bike picker panel',
+  html.indexOf('id="handoffScrim"') !== -1 && html.indexOf('id="handoffBikes"') !== -1 &&
+  html.indexOf('id="handoffSendBtn"') !== -1);
+check('index.html never pre-selects a handoff bike',
+  html.indexOf("handoffSendBtn').disabled = true") !== -1);
 
 var failed = results.filter(function (r) { return !r[1]; });
 console.log('\n' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed.');

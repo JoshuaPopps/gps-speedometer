@@ -14,6 +14,8 @@ Lean angle is intentionally not included: it needs the phone fixed to the bike i
 
 **Planned-route GPX export (v1.5.0):** once a plan has a route, Export GPX downloads the plan as a GPX 1.1 file — the track follows the routed geometry, and the waypoints are Here, each stop, and the destination, so another app or a GPS can follow the same plan. Built from the route the planner already holds; no new network calls.
 
+**Send a ride to the Bike Log (v1.6.0):** any saved ride — or a planned route — can go to the Bike Maintenance Log's Rides tab as one entry: route, miles (one decimal), date, and the figures the ride actually recorded. Tap Send to Bike Log on the ride (or on the plan), pick which of the three roster bikes it was on — the speedo keeps no bike on a ride, so it asks every time and never guesses — and the Bike Log shows its own confirm card before writing anything. A planned route is labelled not-ridden-yet. Rides never move the odometer, on either side: the handoff carries no odometer figure at all.
+
 ## Privacy
 
 What leaves the phone is only the route request itself — your position and the destination coordinates — sent to whichever routing server is configured. Nothing else leaves: no account, no identifier, no location history, no ride data. There is no analytics and no telemetry of any kind.

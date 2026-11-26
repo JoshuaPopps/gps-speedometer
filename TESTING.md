@@ -27,7 +27,19 @@ point), and `planGpxFileName` (plan-<destination slug>-<timestamp>.gpx)
 are extracted from `index.html` and tested on a synthetic merged
 route. The file also asserts the Plan a route section and its library
 citations are in the shipped page, and that the service-worker cache
-is `gps-speedometer-v3`.
+is `gps-speedometer-v4`.
+
+The ride handoff (v1.6.0, kind `ride-to-ride`) is covered by
+requiring `handoff.js` directly plus the Bike Log's `app.js` as the
+receiver: `recordedRidePayload` (miles to one decimal, local ride
+date, notes from recorded figures only), `plannedRidePayload` (stops
+in order, labelled not-ridden-yet), the envelope/URL build (throws
+with no bike picked, with an unknown roster key, and on a zero-mile
+ride), and the full round-trip — the link parses in the Bike Log,
+resolves the bike by name, previews the ride, and adding it leaves
+the odometer alone. The file also asserts the Send to Bike Log
+buttons and the bike-picker panel are in the shipped page, with no
+bike pre-selected.
 
 Run (from this directory):
 

@@ -250,6 +250,8 @@
   .panel-close-btn:active{ transform:translate(1px,1px); }
   .panel-status{ margin:12px 0 0; text-align:center; font-family:"Archivo Narrow",sans-serif; font-size:13px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
   .panel-status[hidden]{ display:none; }
+  .handoff-bike{ display:flex; align-items:center; gap:12px; min-height:48px; font-size:17px; font-weight:600; color:var(--ink); cursor:pointer; }
+  .handoff-bike input{ width:20px; height:20px; flex:none; accent-color:var(--accent); }
   .simple-view{ position:fixed; inset:0; z-index:60; background:#000; color:#f4f4f8; overflow:hidden; cursor:pointer; -webkit-tap-highlight-color:transparent; touch-action:none; user-select:none; -webkit-user-select:none; }
   .simple-view[hidden]{ display:none; }
   .simple-view .ro-speed{ font-size:calc(clamp(140px, min(60vw, 52vh), 380px) * var(--spd-scale, 1)); }
@@ -519,6 +521,7 @@
       <button type="button" class="ghost-btn" id="planRouteBtn">Plan route</button>
       <button type="button" class="ghost-btn" id="planNavBtn" hidden>Navigate this plan</button>
       <button type="button" class="ghost-btn" id="planGpxBtn" hidden>Export GPX</button>
+      <button type="button" class="ghost-btn" id="planSendBtn" hidden>Send to Bike Log</button>
     </div>
     <div class="plan-summary" id="planSummary" hidden>
       <div class="plan-total" id="planTotal"></div>
@@ -642,6 +645,28 @@
   </div>
 </div>
 
+<!-- Send ride to Bike Log panel -->
+<div class="panel-scrim" id="handoffScrim" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="handoffTitle">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">Speedo · Send ride</div>
+        <div class="panel-title" id="handoffTitle">Send to Bike Log</div>
+        <div class="panel-rule"></div>
+      </div>
+      <button type="button" class="panel-close" id="handoffCloseX" aria-label="Close send panel">×</button>
+    </div>
+    <p class="install-note" style="border:0; padding-top:0; margin-top:12px;" id="handoffSummary"></p>
+    <p class="install-note" style="border:0; padding-top:0;">Which bike is this ride for? The speedo keeps no bike on a ride, so it cannot tell on its own — pick the roster bike. The Bike Log shows its own confirm card before it writes anything, and the ride never moves the odometer.</p>
+    <div id="handoffBikes"></div>
+    <p class="panel-status" id="handoffNote" hidden></p>
+    <div class="row-btns">
+      <button type="button" class="ghost-btn" id="handoffSendBtn" disabled>Send to Bike Log</button>
+      <button type="button" class="ghost-btn" id="handoffCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Simple view: full-screen black face -->
 <div class="simple-view" id="simpleView" hidden aria-label="Simple view. Tap for settings.">
   <div class="drift-space" id="simpleSpace">
@@ -713,6 +738,7 @@
 </div>
 
 <script src="sw-update.js"></script>
+<script src="handoff.js"></script>
 <script>
 (function(){
   "use strict";
@@ -837,7 +863,7 @@
      A ride is one Start → Stop session. A tap that goes nowhere
      (under 5 track points and under 50 m) is not saved. If the tab
      closes mid-ride, the in-progress ride is recovered on next load. */
-  var APP_VERSION = '1.5.0';
+  var APP_VERSION = '1.6.0';
   var RIDES_KEY = 'gpsSpeedo.rides.v1';
   var CURRENT_KEY = 'gpsSpeedo.current.v1';
   var MAX_RIDES = 30;
@@ -1093,7 +1119,11 @@
         followBtn.addEventListener('click', function(){ startGpxFollow(ride); });
         actions.appendChild(followBtn);
       }
-      actions.appendChild(gpxBtn); actions.appendChild(delBtn);
+      actions.appendChild(gpxBtn);
+      var sendBtn = document.createElement('button'); sendBtn.type = 'button'; sendBtn.className = 'ghost-btn'; sendBtn.textContent = 'Send to Bike Log';
+      sendBtn.addEventListener('click', function(){ openRideHandoff(ride); });
+      actions.appendChild(sendBtn);
+      actions.appendChild(delBtn);
       li.appendChild(actions);
     }
     if (isCurrent){
@@ -1158,6 +1188,97 @@
         showNotice('error', '<strong>Couldn\'t read that file.</strong> Try again.');
       };
       reader.readAsText(file);
+    });
+  }
+
+  /* ---------- Send a ride to the Bike Log (HANDOFF-FORMAT.md v1.3,
+     kind "ride-to-ride") ----------
+     The speedo keeps no bike on a ride, so the panel asks which
+     roster bike — three radios, none pre-selected, and the Send
+     button stays disabled until one is picked. No bike, no send:
+     Speedo_Handoff.buildUrl throws without a roster bike, and the
+     panel never offers a default. On send the link opens the Bike
+     Log, which shows its own confirm card before writing anything.
+     A recorded ride sends what the GPS recorded; a planned route
+     sends the plan, labelled not-ridden-yet. Neither sends an
+     odometer figure — a ride never moves it. */
+  var pendingHandoffPayload = null;
+  function closeHandoffPanel(){
+    pendingHandoffPayload = null;
+    var scrim = $('handoffScrim');
+    if (scrim) scrim.hidden = true;
+  }
+  function openHandoffPanel(payload){
+    if (typeof Speedo_Handoff === 'undefined'){
+      showNotice('error', '<strong>Couldn\'t send this ride.</strong> The handoff code didn\'t load — reload the page and try again.');
+      return;
+    }
+    pendingHandoffPayload = payload;
+    var summary = $('handoffSummary');
+    summary.textContent = payload.route + ' — ' + payload.miles.toFixed(1) + ' mi · ' + payload.date +
+      (payload.kind === 'planned' ? ' · planned, not ridden yet' : ' · recorded ride');
+    var host = $('handoffBikes');
+    host.innerHTML = '';
+    Speedo_Handoff.ROSTER.forEach(function(b){
+      var label = document.createElement('label');
+      label.className = 'handoff-bike';
+      var input = document.createElement('input');
+      input.type = 'radio'; input.name = 'handoff-bike'; input.value = b.rosterKey;
+      input.addEventListener('change', function(){
+        $('handoffSendBtn').disabled = false;
+        $('handoffNote').hidden = true;
+      });
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(b.name));
+      host.appendChild(label);
+    });
+    $('handoffSendBtn').disabled = true;
+    $('handoffNote').hidden = true;
+    $('handoffScrim').hidden = false;
+  }
+  function openRideHandoff(ride){
+    if (typeof Speedo_Handoff === 'undefined'){
+      showNotice('error', '<strong>Couldn\'t send this ride.</strong> The handoff code didn\'t load — reload the page and try again.');
+      return;
+    }
+    var payload;
+    try { payload = Speedo_Handoff.recordedRidePayload(ride); }
+    catch (e){ showNotice('error', '<strong>Couldn\'t send this ride.</strong> ' + escXml(e.message)); return; }
+    openHandoffPanel(payload);
+  }
+  function openPlanHandoff(){
+    if (typeof Speedo_Handoff === 'undefined'){
+      showNotice('error', '<strong>Couldn\'t send this plan.</strong> The handoff code didn\'t load — reload the page and try again.');
+      return;
+    }
+    var payload;
+    try { payload = Speedo_Handoff.plannedRidePayload(plan.route); }
+    catch (e){ showNotice('error', '<strong>Couldn\'t send this plan.</strong> ' + escXml(e.message)); return; }
+    openHandoffPanel(payload);
+  }
+  function wireHandoff(){
+    var sendBtn = $('handoffSendBtn');
+    if (!sendBtn) return;
+    sendBtn.addEventListener('click', function(){
+      var picked = document.querySelector('input[name="handoff-bike"]:checked');
+      var note = $('handoffNote');
+      if (!picked){
+        note.textContent = 'Pick a bike first.';
+        note.hidden = false;
+        return;
+      }
+      var bike = Speedo_Handoff.bikeForKey(picked.value);
+      try {
+        window.location.href = Speedo_Handoff.buildUrl(pendingHandoffPayload, bike);
+      } catch (err){
+        note.textContent = 'Could not send: ' + err.message;
+        note.hidden = false;
+      }
+    });
+    $('handoffCancelBtn').addEventListener('click', closeHandoffPanel);
+    $('handoffCloseX').addEventListener('click', closeHandoffPanel);
+    $('handoffScrim').addEventListener('click', function(ev){
+      if (ev.target === $('handoffScrim')) closeHandoffPanel();
     });
   }
 
@@ -2878,6 +2999,7 @@
     destResults: $('planDestResults'), destLine: $('planDestLine'),
     rangeMi: $('planRangeMi'), marginMi: $('planMarginMi'),
     routeBtn: $('planRouteBtn'), navBtn: $('planNavBtn'), gpxBtn: $('planGpxBtn'), clearBtn: $('planClearBtn'),
+    sendBtn: $('planSendBtn'),
     summary: $('planSummary'), total: $('planTotal'), legs: $('planLegs'),
     fuelList: $('planFuelList')
   };
@@ -2942,6 +3064,7 @@
     planEls.summary.hidden = !hasRoute;
     planEls.navBtn.hidden = !hasRoute;
     planEls.gpxBtn.hidden = !hasRoute;
+    planEls.sendBtn.hidden = !hasRoute;
     if (!hasRoute) return;
     var route = plan.route;
     var rideTime = route.totalS > 0 ? formatTime(route.totalS * 1000) : '';
@@ -3102,6 +3225,10 @@
       if (!plan.route) return;
       downloadText(planGpxFileName(plan.route), buildPlanGpx(plan.route));
     });
+    planEls.sendBtn.addEventListener('click', function(){
+      if (!plan.route) return;
+      openPlanHandoff();
+    });
     planEls.clearBtn.addEventListener('click', function(){
       plan.stops = []; plan.dest = null; plan.route = null; plan.source = ''; plan.destName = '';
       planEls.rangeMi.value = ''; plan.rangeMi = '';
@@ -3142,6 +3269,7 @@
   if (els.versionLine) els.versionLine.textContent = 'GPS Speedometer v' + APP_VERSION + ' · Rides stay on this device — no account, no cloud.';
   window.addEventListener('pagehide', function(){ if (state.currentRide) saveCurrent(state.currentRide); });
   wireGpxImport();
+  wireHandoff();
   wireNav();
   wirePlan();
   wireLean();
